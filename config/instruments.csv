@@ -1,0 +1,10 @@
+venue,symbol,venue_symbol,base,quote,tick_size,lot_size,contract_type,maker_fee_bps,taker_fee_bps,valid_from,valid_to,source,symbol_norm
+binance-usdm,BTCUSDT,BTCUSDT,BTC,USDT,0.1,0.001,perp,2.0,5.0,2026-11-01,,https://fapi.binance.com/fapi/v1/exchangeInfo,BTC/USDT:USDT
+binance-usdm,ETHUSDT,ETHUSDT,ETH,USDT,0.01,0.001,perp,2.0,5.0,2026-11-01,,https://fapi.binance.com/fapi/v1/exchangeInfo,ETH/USDT:USDT
+binance-usdm,SOLUSDT,SOLUSDT,SOL,USDT,0.01,0.01,perp,2.0,5.0,2026-11-01,,https://fapi.binance.com/fapi/v1/exchangeInfo,SOL/USDT:USDT
+coinbase,BTC-USD,BTC-USD,BTC,USD,0.01,1e-08,spot,40.0,60.0,2026-11-01,,https://api.exchange.coinbase.com/products/BTC-USD,BTC/USD
+coinbase,ETH-USD,ETH-USD,ETH,USD,0.01,1e-08,spot,40.0,60.0,2026-11-01,,https://api.exchange.coinbase.com/products/ETH-USD,ETH/USD
+coinbase,SOL-USD,SOL-USD,SOL,USD,0.01,1e-08,spot,40.0,60.0,2026-11-01,,https://api.exchange.coinbase.com/products/SOL-USD,SOL/USD
+kraken,BTC/USD,BTC/USD,BTC,USD,0.1,1e-08,spot,40.0,80.0,2026-11-01,,https://api.kraken.com/0/public/AssetPairs,BTC/USD
+kraken,ETH/USD,ETH/USD,ETH,USD,0.01,1e-08,spot,40.0,80.0,2026-11-01,,https://api.kraken.com/0/public/AssetPairs,ETH/USD
+kraken,SOL/USD,SOL/USD,SOL,USD,0.01,1e-08,spot,40.0,80.0,2026-11-01,,https://api.kraken.com/0/public/AssetPairs,SOL/USD

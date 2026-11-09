@@ -1,0 +1,104 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CLICKHOUSE_IMAGE: clickhouse/clickhouse-server:26.8.36.3
+
+jobs:
+  lint-type:
+    name: lint, types, secrets, no data
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy src
+      - name: detect-secrets
+        run: git ls-files -z | xargs -0 uv run detect-secrets-hook --baseline .secrets.baseline
+      - name: no data files in git
+        run: git ls-files -z | xargs -0 uv run python scripts/check_no_data.py
+
+  test:
+    name: tests (ubuntu, py${{ matrix.python }}, ClickHouse)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.12", "3.13"]
+    env:
+      CLICKHOUSE_HOST: localhost
+      CLICKHOUSE_HTTP_PORT: "8123"
+      CLICKHOUSE_USER: tickdb
+      CLICKHOUSE_PASSWORD: ci-throwaway-local-only  # pragma: allowlist secret
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start ClickHouse with the repo's config
+        run: |
+          docker run -d --name clickhouse -p 127.0.0.1:8123:8123 \
+            --ulimit nofile=262144:262144 \
+            -e CLICKHOUSE_DB=tickdb -e CLICKHOUSE_USER -e CLICKHOUSE_PASSWORD \
+            -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 \
+            -v "$PWD/docker/clickhouse/config.d/tickdb.xml:/etc/clickhouse-server/config.d/tickdb.xml:ro" \
+            -v "$PWD/docker/clickhouse/users.d/tickdb_profile.xml:/etc/clickhouse-server/users.d/tickdb_profile.xml:ro" \
+            -v "$PWD/docker/clickhouse/init:/docker-entrypoint-initdb.d:ro" \
+            "$CLICKHOUSE_IMAGE"
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - run: uv sync --locked
+      - name: Wait for ClickHouse
+        run: |
+          for i in $(seq 60); do
+            if curl -sf -u "tickdb:$CLICKHOUSE_PASSWORD" 'http://127.0.0.1:8123/?query=EXISTS%20DATABASE%20tickdb' | grep -q 1; then exit 0; fi
+            sleep 2
+          done
+          docker logs clickhouse; exit 1
+      - run: uv run pytest -m "not live and not data and not bench" --cov --cov-report=term-missing --cov-fail-under=85
+      - name: Compose file is valid
+        run: CLICKHOUSE_PASSWORD=x GRAFANA_ADMIN_PASSWORD=y DATA_ROOT=/tmp/tickdb docker compose config --quiet  # pragma: allowlist secret
+
+  test-client-windows:
+    name: unit tests (windows, py3.12)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked
+      - run: uv run pytest tests/unit
+
+  docs:
+    name: docs (mkdocs --strict)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - run: uv sync --locked
+      - run: uv run mkdocs build --strict
+
+  ci:
+    name: ci
+    if: always()
+    needs: [lint-type, test, test-client-windows, docs]
+    runs-on: ubuntu-latest
+    steps:
+      - name: All jobs passed
+        run: |
+          test "${{ needs.lint-type.result }}" = success
+          test "${{ needs.test.result }}" = success
+          test "${{ needs.test-client-windows.result }}" = success
+          test "${{ needs.docs.result }}" = success

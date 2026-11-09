@@ -2,7 +2,7 @@
 
 > Capture, store and serve tick data the way a research team would rely on it every day.
 
-**Status:** planning
+**Status:** in progress, milestone M1 (scaffolding, CI, stack, smoke test). Build spec milestones M1 to M7; docs in `docs/`.
 
 | | |
 |---|---|

@@ -1,0 +1,17 @@
+site_name: tickdb
+site_description: Tick capture, storage and query platform
+repo_url: https://github.com/avmhdt/tick-data-platform
+theme:
+  name: material
+  features: [navigation.sections, content.code.copy]
+markdown_extensions:
+  - admonition
+  - tables
+  - toc: {permalink: true}
+  - pymdownx.superfences
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Schemas: schemas.md
+  - Operations: operations.md
+  - Decisions: decisions.md
