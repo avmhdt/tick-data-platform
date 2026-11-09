@@ -1,0 +1,87 @@
+# Tick data platform stack. Run from the WSL2 Ubuntu distro (`make up`), never from Windows.
+# Data lives under ${DATA_ROOT} on WSL ext4 through bind mounts; no named volumes (spec 7d).
+# Every port is bound to 127.0.0.1 only (NFR-08).
+#
+# Live crypto data comes from the one shared capture (crypto-lob-alpha), so this file has no
+# recorder containers for binance-usdm, coinbase or kraken (docs/decisions.md).
+
+name: tickdb
+
+x-logging: &logging
+  driver: json-file
+  options: {max-size: 50m, max-file: "5"}
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.8.36.3
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      CLICKHOUSE_DB: tickdb
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-tickdb}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD in .env (scripts/gen_env.sh)}
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+    ports:
+      - "127.0.0.1:${CLICKHOUSE_HTTP_PORT:-8123}:8123"
+    volumes:
+      - ${DATA_ROOT:?set DATA_ROOT in .env}/clickhouse:/var/lib/clickhouse
+      - ./docker/clickhouse/config.d/tickdb.xml:/etc/clickhouse-server/config.d/tickdb.xml:ro
+      - ./docker/clickhouse/users.d/tickdb_profile.xml:/etc/clickhouse-server/users.d/tickdb_profile.xml:ro
+      - ./docker/clickhouse/init:/docker-entrypoint-initdb.d:ro
+    ulimits:
+      nofile: {soft: 262144, hard: 262144}
+    healthcheck:
+      test: ["CMD-SHELL", "clickhouse-client --user \"$$CLICKHOUSE_USER\" --password \"$$CLICKHOUSE_PASSWORD\" -q 'SELECT 1' >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  prometheus:
+    image: prom/prometheus:v3.15.1
+    restart: unless-stopped
+    logging: *logging
+    user: "${TICKDB_UID:-1000}:${TICKDB_GID:-1000}"
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=45d
+      - --web.listen-address=0.0.0.0:9090
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    volumes:
+      - ${DATA_ROOT:?set DATA_ROOT in .env}/prometheus:/prometheus
+      - ./docker/prometheus:/etc/prometheus:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/-/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  grafana:
+    image: grafana/grafana:13.2.5
+    restart: unless-stopped
+    logging: *logging
+    user: "${TICKDB_UID:-1000}:${TICKDB_GID:-1000}"
+    depends_on:
+      prometheus: {condition: service_healthy}
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env (scripts/gen_env.sh)}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      GF_PLUGINS_PREINSTALL_SYNC: grafana-clickhouse-datasource@4.23.4
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+    volumes:
+      - ${DATA_ROOT:?set DATA_ROOT in .env}/grafana:/var/lib/grafana
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/grafana/dashboards:/var/lib/grafana-dashboards:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s

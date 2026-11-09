@@ -1,0 +1,21 @@
+<clickhouse>
+    <!-- Memory: leave half the WSL VM to the shared host (NFR-11, R-08). -->
+    <max_server_memory_usage_to_ram_ratio>0.5</max_server_memory_usage_to_ram_ratio>
+    <!-- Inside the container; compose publishes 8123 on 127.0.0.1 only (NFR-08). -->
+    <listen_host>0.0.0.0</listen_host>
+    <logger>
+        <level>warning</level>
+        <size>100M</size>
+        <count>5</count>
+    </logger>
+    <!-- Keep system log tables small on the shared HDD. -->
+    <query_log>
+        <database>system</database>
+        <table>query_log</table>
+        <ttl>event_date + INTERVAL 14 DAY DELETE</ttl>
+    </query_log>
+    <trace_log remove="1"/>
+    <text_log remove="1"/>
+    <metric_log remove="1"/>
+    <asynchronous_metric_log remove="1"/>
+</clickhouse>

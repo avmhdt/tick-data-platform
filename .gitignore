@@ -40,3 +40,10 @@ Thumbs.db
 
 # Local build spec (kept out of the public repo)
 SPEC.html
+
+# tickdb
+/data
+site/
+results/job_log.csv
+.coverage
+coverage.xml

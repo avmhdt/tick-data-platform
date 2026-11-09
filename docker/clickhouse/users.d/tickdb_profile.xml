@@ -1,0 +1,9 @@
+<clickhouse>
+    <!-- Query limits for the shared host; joins stay day-bounded (R-08). -->
+    <profiles>
+        <default>
+            <max_memory_usage>8000000000</max_memory_usage>
+            <max_threads>8</max_threads>
+        </default>
+    </profiles>
+</clickhouse>

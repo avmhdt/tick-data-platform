@@ -1,0 +1,64 @@
+# Main config (spec section 10). Values written as ${NAME} are filled from .env (.env.example).
+version: 1
+data_root: ${TICKDB_DATA_DIR}
+symbols_default: [BTC, ETH, SOL]   # D-05
+
+# Live crypto data comes from the one shared capture run by crypto-lob-alpha (owner
+# decision, docs/decisions.md). This project never runs a second recorder of these venues.
+capture:
+  mode: shared
+  shared_root: ~/data/crypto-lob-alpha
+
+# Endpoints match what the shared capture records (verified 2026-11-01 in
+# crypto-lob-alpha docs/venues.md, re-checked by `tickdb smoke`).
+venues:
+  binance-usdm:                    # Binance USD-M futures, primary
+    enabled: true                  # D-01
+    ws_url: wss://fstream.binance.com
+    ws_routes: {trades: /market/stream, book_l2: /public/stream}
+    rest_url: https://fapi.binance.com
+    symbols: [BTCUSDT, ETHUSDT, SOLUSDT]
+    channels: [trades, book_l2]
+    trades: {stream: aggTrade}
+    book: {stream: "depth@100ms", snapshot_limit: 1000, rest_checkpoint_s: 600}   # D-06, DQ-04
+    max_conn_lifetime: 23h
+    metrics_port: 9101
+  coinbase:
+    enabled: true
+    ws_url: wss://ws-feed.exchange.coinbase.com
+    rest_url: https://api.exchange.coinbase.com
+    symbols: [BTC-USD, ETH-USD, SOL-USD]
+    channels: [trades, book_l2, heartbeats]
+    trades: {stream: matches}
+    book: {stream: level2_batch, rest_checkpoint_s: 600}   # DQ-04
+    auth: none
+    metrics_port: 9102
+  kraken:
+    enabled: true
+    ws_url: wss://ws.kraken.com/v2
+    rest_url: https://api.kraken.com
+    symbols: [BTC/USD, ETH/USD, SOL/USD]   # partition dirs percent-encode '/'
+    channels: [trades, book_l2]
+    trades: {stream: trade}
+    book: {stream: book, depth: 100, checksum: true}
+    metrics_port: 9103
+
+reconnect: {base_s: 1.0, factor: 2.0, cap_s: 60.0, jitter: full, stable_reset_s: 300}
+silence_timeout_s: {trades: 120, book_l2: 15}
+spool: {flush_interval_ms: 1000, zstd_level: 3, queue_max_frames: 100000}
+rest: {max_fraction_of_limit: 0.5, timeout_s: 10, retries: 3}
+compaction:
+  daily_at_utc: "01:30"
+  late_window_h: 1
+  parquet: {compression: zstd, compression_level: 3, row_group_rows: 1000000, max_file_mb: 512}
+clickhouse:
+  host: ${CLICKHOUSE_HOST}
+  port: ${CLICKHOUSE_HTTP_PORT}
+  database: tickdb
+  book_l2_ttl_days: 90   # D-11
+dq:
+  outlier: {window_s: 60, mad_k: 10, min_bps: 50, outside_bbo_pct: 1.0}
+  clock_offset_max_ms: 50
+  coverage_warn_pct: 99.0
+retention: {raw_spool_days: 30, require_verified: true, prometheus_days: 45}   # D-10
+bench: {reps: 10, seed: 7, reference: {venue: binance-usdm, symbol: BTCUSDT, date: auto}}
