@@ -49,6 +49,7 @@ same HDD. Never stop, restart or reconfigure `lob-recorder` from this project.
 | Date (UTC) | Event |
 |---|---|
 | 2026-11-09 | `docker` inside Ubuntu cannot reach the daemon: `/var/run/docker.sock` (dated 2026-11-03) has no engine behind it, while `docker.exe` on Windows works. Docker Desktop's WSL integration for Ubuntu needs re-enabling by the owner (Settings → Resources → WSL integration → Ubuntu, Apply & restart). `make up` waits on this. |
+| 2026-11-09 | M1 stack check through Docker Desktop from Windows (`docker.exe compose`, a throwaway project, throwaway passwords in the shell, an empty test data folder, since removed): ClickHouse, Prometheus and Grafana all reached `healthy`; the 4 ClickHouse integration tests passed (user `tickdb` works, `default` refused, memory ratio 0.5); Prometheus target up; Grafana 13.2.5 healthy with `grafana-clickhouse-datasource` 4.23.4 installed and anonymous API access refused (401). Bind mounts through the `\\wsl.localhost` path need the containers' user set to root, so they are not representative: the real run is `make up` from Ubuntu once the integration is back. |
 
 ## Tests that need local resources
 
