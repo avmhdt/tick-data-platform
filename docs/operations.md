@@ -44,6 +44,31 @@ shared capture on this PC (see [decisions](decisions.md)). This project only rea
 under `~/data/crypto-lob-alpha`, and must keep that I/O light because the recorder writes to the
 same HDD. Never stop, restart or reconfigure `lob-recorder` from this project.
 
+## Raw mirror of the shared capture
+
+The capture window for AC-W-01 is 2026-11-08 to 2026-12-07 (owner ruling, see
+[decisions](decisions.md)). The shared recorder deletes raw files after 7 days, so an hourly
+job copies each closed hour into `$DATA_ROOT/raw/external/lob-alpha/`.
+
+- Deploy clone: `~/tick-data-platform-deploy` (WSL ext4), branch and commit noted in the log
+  below. Update it with `git pull && ~/.local/bin/uv sync --locked`.
+- Log: `~/data/tick-data-platform/meta/mirror/run.log`, one JSON summary per run.
+- Manifests: `~/data/tick-data-platform/meta/mirror/date=<D>.jsonl` (file, bytes, SHA-256).
+- Check completeness (exit 2 if a closed hour is missing):
+
+```bash
+cd ~/tick-data-platform-deploy && ~/.local/bin/uv run --no-sync tickdb mirror status \
+  --source ~/data/crypto-lob-alpha --dest ~/data/tick-data-platform \
+  --from 2026-11-08 --to 2026-12-07 --exclude binance-usdm:ticker
+```
+
+The cron entry (WSL crontab of user `ze`; remove it after 2026-12-09):
+
+```cron
+# tdp-mirror: tick-data-platform read-only copy of the shared raw archive, window 2026-11-08..12-07. Remove after 2026-12-09.
+25 * * * * cd /home/ze/tick-data-platform-deploy && nice -n 10 ionice -c3 /home/ze/.local/bin/uv run --no-sync tickdb mirror run --source /home/ze/data/crypto-lob-alpha --dest /home/ze/data/tick-data-platform --from 2026-11-08 --to 2026-12-07 --exclude binance-usdm:ticker --guard-path /mnt/d --floor-gb 150 --rate-mb 8 >> /home/ze/data/tick-data-platform/meta/mirror/run.log 2>&1 # tdp-mirror
+```
+
 ## Incidents and owner steps
 
 | Date (UTC) | Event |

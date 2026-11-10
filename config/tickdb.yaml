@@ -55,10 +55,10 @@ clickhouse:
   host: ${CLICKHOUSE_HOST}
   port: ${CLICKHOUSE_HTTP_PORT}
   database: tickdb
-  book_l2_ttl_days: 90   # D-11
+  book_l2_ttl_days: 14   # D-11, owner decision 2026-11-09 (spec default 90)
 dq:
   outlier: {window_s: 60, mad_k: 10, min_bps: 50, outside_bbo_pct: 1.0}
   clock_offset_max_ms: 50
   coverage_warn_pct: 99.0
-retention: {raw_spool_days: 30, require_verified: true, prometheus_days: 45}   # D-10
+retention: {raw_spool_days: 7, require_verified: true, prometheus_days: 45}   # D-10, owner decision 2026-11-09 (spec default 30)
 bench: {reps: 10, seed: 7, reference: {venue: binance-usdm, symbol: BTCUSDT, date: auto}}

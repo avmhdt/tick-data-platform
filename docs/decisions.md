@@ -50,6 +50,14 @@ the build. `DECISIONS.md` overrides the spec, and the spec overrides `README.md`
   time.cloudflare.com. Don't let Ubuntu's chronyd steer the clock.
 - **Publishing:** aggregates only. No AI attribution anywhere.
 
+### Owner rulings during the build
+
+| Date | Item | Ruling |
+|---|---|---|
+| 2026-11-10 | AC-W-01 30-day window (M2) | Owner, quoted: "Yes, I'll extend it (Recommended)". The window is **2026-11-08 to 2026-12-07**. The owner extends the Windows Update pause (or sets notify-only) through about 2026-12-15; crypto-lob-alpha's session keeps `lob-recorder` running to at least 2026-12-08. This project never touches the recorder. A light read-only copy of the shared raw archive starts from 2026-11-08 at once, so those days survive the recorder's 7-day raw cleanup. |
+| 2026-11-09 | Retention cuts (D-10, D-11) | Owner, quoted: "Approve the cuts (Recommended)". Raw spool copies are kept **7 days** (spec default 30), still deleted only after that day's verify and replay hash pass. ClickHouse `book_l2` TTL is **14 days** (spec default 90), reloadable from Parquet. Trades, BBO, bars, the Parquet archive, gaps and DQ results keep full retention. Recorded as deviations from the spec defaults. |
+| 2026-11-10 | Owner location | The owner is in Brazil, not the Cayman Islands, with no VPN or proxy. The M1 smoke test (2026-11-09) therefore ran from Brazil: all three venues reachable over websocket and REST, no geo-block, no auth. Nothing in this project's venue access depends on the declared country. |
+
 ## Spec decisions (section 3)
 
 | ID | Decision | Status |
@@ -59,12 +67,12 @@ the build. `DECISIONS.md` overrides the spec, and the spec overrides `README.md`
 | D-03 | VPS spend | Resolved 2026-10-31: not needed, USD 0. |
 | D-04 | Databento spend | Default: not approved. |
 | D-05 | Symbols | Default: BTC, ETH, SOL per venue, venue-native symbols (9 streams). |
-| D-06 | Book depth | Default: Binance USD-M `depth@100ms` + 1000-level snapshot; Coinbase level2 (`level2_batch` on the Exchange feed, see below); Kraken depth 100. |
+| D-06 | Book depth | Binance USD-M `depth@100ms` + 1000-level snapshot; Coinbase level2 (`level2_batch` on the Exchange feed, see below); Kraken **1000**, not the default 100, because that is what the shared capture subscribes to (agent decision, M2). |
 | D-07 | kdb+ comparison | Default: skip. |
 | D-08 | Public DQ dashboard | Default (a): static DQ site on GitHub Pages, aggregates only. |
 | D-09 | ITCH fallback | Default: defer FR-25 if itch-feed-handler output is missing. Its output exists (see above). |
-| D-10 | Raw spool retention | Default: 30 days, deleted only after verify and replay pass. |
-| D-11 | ClickHouse `book_l2` TTL | Default: 90 days. |
+| D-10 | Raw spool retention | **7 days** (owner decision 2026-11-09, spec default 30), deleted only after verify and replay pass. |
+| D-11 | ClickHouse `book_l2` TTL | **14 days** (owner decision 2026-11-09, spec default 90). |
 | D-12 | Docker runtime | Resolved 2026-10-31: Docker Desktop with WSL2 backend. |
 | D-13 | Licence | Default: MIT (`LICENSE`, `license = "MIT"` in `pyproject.toml`). |
 | D-14 | Ingestor language | Fixed: Python 3.12 asyncio. |
@@ -108,3 +116,24 @@ the build. `DECISIONS.md` overrides the spec, and the spec overrides `README.md`
 10. **WSL virtualenv.** `make` targets use `UV_PROJECT_ENVIRONMENT=~/.cache/tickdb/venv` on WSL
     ext4, so the repo on `/mnt/d` holds no Linux build tree and Windows and WSL environments
     don't collide.
+
+### M2 (2026-11-10)
+
+1. **The raw spool is a mirror of the shared capture.** `tickdb mirror run` copies each closed
+   hour of `~/data/crypto-lob-alpha/raw/ws/venue=<v>/date=<D>/<HH>-<group>-<run>.jsonl.zst`
+   byte for byte to `$DATA_ROOT/raw/external/lob-alpha/` (spec 7d's `raw/external/`), with a
+   manifest line per file (bytes, SHA-256) in `meta/mirror/date=<D>.jsonl`. The files keep the
+   recorder's own line format (`ts_recv	payload` for frames, `ts_recv	!<json>	<body>` for
+   control records), which M3's normalizers read directly. Re-encoding them into the spec's
+   spool record would double the I/O on the shared HDD for no gain: the payloads are already
+   verbatim and stamped before parsing.
+2. **What is copied:** everything except Binance `bookTicker` groups (`ticker.*`, about 2 GB a
+   day), because `bbo` is derived from the book (FR-08). Only hours that ended at least 10
+   minutes ago; a copy with the same size is skipped; copies are fsynced and renamed into place.
+3. **Load on the shared PC:** reads capped at 8 MB/s, `nice 10`, `ionice` idle, one run at a
+   time (file lock), at hh:25 so it doesn't overlap vol-surface-modeling's hh:15 job. The run
+   stops before D: would fall under 150 GB, if D:'s free space can't be read, or if free memory
+   falls under 30 GB.
+4. **Deployment:** a clone on WSL ext4 at `~/tick-data-platform-deploy` with its own uv venv,
+   so the job survives a broken `/mnt/d` mount. It runs under cron; see
+   [operations](operations.md).
