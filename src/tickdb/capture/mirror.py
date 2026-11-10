@@ -19,6 +19,7 @@ run at a time (file lock).
 from __future__ import annotations
 
 import hashlib
+import itertools
 import os
 import re
 import shutil
@@ -309,3 +310,89 @@ def status(
             )
         )
     return out
+
+
+@dataclass(frozen=True)
+class VerifyResult:
+    day: date
+    files: int
+    hash_ok: int
+    hash_bad: tuple[str, ...]
+    unlisted: tuple[str, ...]
+    complete_frames: int
+    cut_frames: tuple[str, ...]
+    lines: int
+
+
+def _manifest_hashes(dest: Path, day: date) -> dict[tuple[str, str], str]:
+    path = dest / "meta" / "mirror" / f"date={day.isoformat()}.jsonl"
+    hashes: dict[tuple[str, str], str] = {}
+    if path.exists():
+        for line in path.read_bytes().splitlines():
+            rec = orjson.loads(line)
+            hashes[(rec["venue"], rec["file"])] = rec["sha256"]  # the last copy wins
+    return hashes
+
+
+def verify(dest: Path, day: date, limiter: RateLimiter | None = None) -> VerifyResult:
+    """Re-hash every mirrored file of ``day`` against its manifest and decode every frame."""
+    from tickdb.ingest.spool import _decode
+
+    limiter = limiter or RateLimiter(0)
+    hashes = _manifest_hashes(dest, day)
+    root = dest / DEST_SUBDIR
+    files = sorted(root.glob(f"venue=*/date={day.isoformat()}/*.jsonl.zst"))
+    ok, bad, unlisted, cut = 0, [], [], []
+    complete = lines = 0
+    for path in files:
+        venue = path.parent.parent.name.removeprefix("venue=")
+        expected = hashes.get((venue, path.name))
+        digest = hashlib.sha256()
+        with path.open("rb") as fh:
+            while chunk := fh.read(CHUNK):
+                digest.update(chunk)
+                limiter.consume(len(chunk))
+        if expected is None:
+            unlisted.append(f"{venue}/{path.name}")
+        elif digest.hexdigest() == expected:
+            ok += 1
+        else:
+            bad.append(f"{venue}/{path.name}")
+        truncated = False
+        for out in _decode(path):
+            if out is None:
+                truncated = True
+                break
+            lines += out.count(b"\n")
+        if truncated:
+            cut.append(f"{venue}/{path.name}")
+        else:
+            complete += 1
+    return VerifyResult(
+        day, len(files), ok, tuple(bad), tuple(unlisted), complete, tuple(cut), lines
+    )
+
+
+def run_log_report(log: Path, since: datetime, until: datetime | None = None) -> dict[str, object]:
+    """Summarize ``run.log`` (one JSON line per run) between ``since`` and ``until``."""
+    runs = []
+    for line in log.read_text(encoding="utf-8").splitlines():
+        try:
+            rec = orjson.loads(line)
+        except orjson.JSONDecodeError:
+            continue
+        stamp = datetime.fromisoformat(str(rec["utc"]))
+        if stamp >= since and (until is None or stamp <= until):
+            runs.append((stamp, rec))
+    gaps = [(b[0] - a[0]).total_seconds() / 3600 for a, b in itertools.pairwise(runs)]
+    return {
+        "runs": len(runs),
+        "first": runs[0][0].isoformat() if runs else None,
+        "last": runs[-1][0].isoformat() if runs else None,
+        "copied_files": sum(int(r["copied"]) for _, r in runs),
+        "copied_bytes": sum(int(r["copied_bytes"]) for _, r in runs),
+        "runs_with_errors": sum(1 for _, r in runs if r["errors"]),
+        "runs_stopped": sum(1 for _, r in runs if r["stopped"]),
+        "max_hours_between_runs": round(max(gaps), 2) if gaps else None,
+        "max_run_seconds": max((float(r.get("seconds", 0)) for _, r in runs), default=0.0),
+    }
