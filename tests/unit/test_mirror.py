@@ -222,6 +222,21 @@ def test_cli_run_locked_and_stopped(source: Path, tmp_path: Path) -> None:
     assert stopped.exit_code == cli.EXIT_CONFIG
 
 
+def test_unreadable_guard_path_stops(source: Path, tmp_path: Path) -> None:
+    result = run(source, tmp_path / "dst", guard_path=tmp_path / "not-mounted")
+    assert result.stopped.startswith("cannot read free space")
+    assert result.copied == 0
+
+
+@unix_only
+def test_cli_to_date_limits_copy(source: Path, tmp_path: Path) -> None:
+    dest = tmp_path / "dst"
+    args = ["mirror", "run", "--source", str(source), "--dest", str(dest)]
+    args += ["--from", "2026-11-01", "--to", "2026-11-07", "--grace-s", "0", "--rate-mb", "0"]
+    result = CliRunner().invoke(cli.app, args)
+    assert orjson.loads(result.stdout)["copied"] == 1
+
+
 def test_cli_bad_date(tmp_path: Path) -> None:
     args = ["mirror", "status", "--from", "nope", "--dest", str(tmp_path)]
     assert CliRunner().invoke(cli.app, args).exit_code == cli.EXIT_CONFIG

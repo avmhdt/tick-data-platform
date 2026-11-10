@@ -229,9 +229,15 @@ def mirror(
         if dst.exists() and dst.stat().st_size == size:
             result.skipped_existing += 1
             continue
-        if guard_path is not None and shutil.disk_usage(guard_path).free - size < floor_bytes:
-            result.stopped = f"free space on {guard_path} would fall below the floor"
-            break
+        if guard_path is not None:
+            try:
+                free = shutil.disk_usage(guard_path).free
+            except OSError as exc:  # e.g. /mnt/d unmounted after a Windows sign-out
+                result.stopped = f"cannot read free space on {guard_path}: {exc}"
+                break
+            if free - size < floor_bytes:
+                result.stopped = f"free space on {guard_path} would fall below the floor"
+                break
         mem = mem_probe()
         if mem is not None and mem < min_mem_bytes:
             result.stopped = "free memory below the limit"

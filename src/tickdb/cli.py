@@ -144,20 +144,24 @@ app.add_typer(mirror_app, name="mirror")
 SourceOpt = Annotated[Path, typer.Option(help="Shared capture data dir (read-only).")]
 DestOpt = Annotated[Path | None, typer.Option(help="Data root; default TICKDB_DATA_DIR/DATA_ROOT.")]
 FromOpt = Annotated[str, typer.Option("--from", help="First UTC date to mirror (YYYY-MM-DD).")]
+ToOpt = Annotated[str | None, typer.Option("--to", help="Last UTC date to mirror (inclusive).")]
 ExcludeOpt = Annotated[
     list[str] | None,
     typer.Option("--exclude", help="VENUE:GROUP_PREFIX to skip, e.g. binance-usdm:ticker."),
 ]
 
 
-def _mirror_args(dest: Path | None, from_: str, exclude: list[str] | None) -> tuple[Path, Any, Any]:
+def _mirror_args(
+    dest: Path | None, from_: str, to: str | None, exclude: list[str] | None
+) -> tuple[Path, Any, Any, Any]:
     from datetime import date as _date
 
     from tickdb.capture import mirror
 
     root = dest or Settings().data_dir
     try:
-        return root, _date.fromisoformat(from_), mirror.parse_excludes(exclude or [])
+        last = _date.fromisoformat(to) if to else None
+        return root, _date.fromisoformat(from_), last, mirror.parse_excludes(exclude or [])
     except ValueError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(EXIT_CONFIG) from exc
@@ -168,6 +172,7 @@ def mirror_run(
     source: SourceOpt = Path("~/data/crypto-lob-alpha"),
     dest: DestOpt = None,
     from_: FromOpt = "2026-11-08",
+    to: ToOpt = None,
     exclude: ExcludeOpt = None,
     rate_mb: Annotated[float, typer.Option(help="Read cap in MB/s.")] = 8.0,
     guard_path: Annotated[Path | None, typer.Option(help="Path on the disk to protect.")] = None,
@@ -182,7 +187,7 @@ def mirror_run(
     """
     from tickdb.capture import mirror
 
-    root, first, excludes = _mirror_args(dest, from_, exclude)
+    root, first, last, excludes = _mirror_args(dest, from_, to, exclude)
     src = source.expanduser()
     with mirror.run_lock(root / "meta" / "mirror" / ".lock") as locked:
         if not locked:
@@ -192,6 +197,7 @@ def mirror_run(
             src,
             root,
             first,
+            to_day=last,
             excludes=excludes,
             grace_s=grace_s,
             rate_bytes_per_s=rate_mb * 1e6,
@@ -211,6 +217,7 @@ def mirror_status(
     source: SourceOpt = Path("~/data/crypto-lob-alpha"),
     dest: DestOpt = None,
     from_: FromOpt = "2026-11-08",
+    to: ToOpt = None,
     exclude: ExcludeOpt = None,
 ) -> None:
     """Per venue and day: closed source files and how many have a same-size copy.
@@ -221,8 +228,8 @@ def mirror_status(
     """
     from tickdb.capture import mirror
 
-    root, first, excludes = _mirror_args(dest, from_, exclude)
-    rows = mirror.status(source.expanduser(), root, first, excludes=excludes)
+    root, first, last, excludes = _mirror_args(dest, from_, to, exclude)
+    rows = mirror.status(source.expanduser(), root, first, to_day=last, excludes=excludes)
     typer.echo(f"{'venue':<14}{'date':<12}{'files':>6}{'closed':>8}{'copied':>8}{'excl':>6}  state")
     for r in rows:
         state = "complete" if r.complete else ("open" if not r.missing else "MISSING")
