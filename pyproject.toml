@@ -65,6 +65,7 @@ python_version = "3.12"
 strict = true
 files = ["src"]
 plugins = ["pydantic.mypy"]
+platform = "linux"
 
 [[tool.mypy.overrides]]
 module = ["pyarrow", "pyarrow.*", "ntplib", "clickhouse_connect", "clickhouse_connect.*"]
