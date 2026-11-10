@@ -201,7 +201,9 @@ def test_cli_run_and_status(source: Path, tmp_path: Path) -> None:
     status = runner.invoke(cli.app, ["mirror", "status", *common])
     assert status.exit_code == cli.EXIT_MISMATCH
     assert "MISSING" in status.stdout
-    result = runner.invoke(cli.app, ["mirror", "run", *common, "--rate-mb", "0", "--grace-s", "0"])
+    result = runner.invoke(
+        cli.app, ["mirror", "run", *common, "--rate-mb", "0", "--grace-s", "0", "--min-mem-gb", "0"]
+    )
     assert result.exit_code == 0, result.output
     assert orjson.loads(result.stdout)["copied"] == 3
     status = runner.invoke(cli.app, ["mirror", "status", *common])
@@ -217,7 +219,17 @@ def test_cli_run_locked_and_stopped(source: Path, tmp_path: Path) -> None:
     with mirror.run_lock(dest / "meta" / "mirror" / ".lock"):
         assert "holds the lock" in runner.invoke(cli.app, args).stdout
     stopped = runner.invoke(
-        cli.app, [*args, "--guard-path", str(tmp_path), "--floor-gb", "1e12", "--grace-s", "0"]
+        cli.app,
+        [
+            *args,
+            "--guard-path",
+            str(tmp_path),
+            "--floor-gb",
+            "1e12",
+            "--grace-s",
+            "0",
+            "--min-mem-gb=0",
+        ],
     )
     assert stopped.exit_code == cli.EXIT_CONFIG
 
@@ -233,6 +245,7 @@ def test_cli_to_date_limits_copy(source: Path, tmp_path: Path) -> None:
     dest = tmp_path / "dst"
     args = ["mirror", "run", "--source", str(source), "--dest", str(dest)]
     args += ["--from", "2026-11-01", "--to", "2026-11-07", "--grace-s", "0", "--rate-mb", "0"]
+    args += ["--min-mem-gb", "0"]
     result = CliRunner().invoke(cli.app, args)
     assert orjson.loads(result.stdout)["copied"] == 1
 
@@ -307,7 +320,7 @@ def test_cli_verify_and_report(tmp_path: Path) -> None:
     dest = tmp_path / "dst"
     runner = CliRunner()
     args = ["mirror", "run", "--source", str(source), "--dest", str(dest), "--grace-s", "0"]
-    assert runner.invoke(cli.app, [*args, "--rate-mb", "0"]).exit_code == 0
+    assert runner.invoke(cli.app, [*args, "--rate-mb", "0", "--min-mem-gb", "0"]).exit_code == 0
     (dest / "meta" / "mirror" / "run.log").write_text(
         orjson.dumps({"copied": 2, "copied_bytes": 1, "errors": [], "stopped": "",
                       "utc": "2026-11-10T19:26:00+00:00"}).decode() + "\n"

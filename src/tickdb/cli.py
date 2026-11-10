@@ -181,6 +181,7 @@ def mirror_run(
     grace_s: Annotated[
         float, typer.Option(help="Seconds after an hour ends before copying.")
     ] = 600,
+    min_mem_gb: Annotated[float, typer.Option(help="Stop if free memory falls below.")] = 30.0,
 ) -> None:
     """Copy closed hours of the shared raw archive, byte for byte, with a manifest.
 
@@ -205,6 +206,7 @@ def mirror_run(
             rate_bytes_per_s=rate_mb * 1e6,
             guard_path=guard_path,
             floor_bytes=int(floor_gb * mirror.GB),
+            min_mem_bytes=int(min_mem_gb * mirror.GB),
         )
     summary = result.as_dict()
     finished = datetime.now(UTC)
