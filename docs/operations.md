@@ -69,6 +69,31 @@ The cron entry (WSL crontab of user `ze`; remove it after 2026-12-09):
 25 * * * * cd /home/ze/tick-data-platform-deploy && nice -n 10 ionice -c3 /home/ze/.local/bin/uv run --no-sync tickdb mirror run --source /home/ze/data/crypto-lob-alpha --dest /home/ze/data/tick-data-platform --from 2026-11-08 --to 2026-12-07 --exclude binance-usdm:ticker --guard-path /mnt/d --floor-gb 150 --rate-mb 8 >> /home/ze/data/tick-data-platform/meta/mirror/run.log 2>&1 # tdp-mirror
 ```
 
+## Capture window
+
+**Day 1 is 2026-11-08** (owner ruling, 2026-11-10). The 30-day AC-W-01 window runs from
+2026-11-08 00:00 to 2026-12-07 24:00 UTC. The shared recorder keeps running to at least
+2026-12-08, and the Windows Update pause is extended through about 2026-12-15.
+
+## Ingestor tests (M2)
+
+The ingestors never run live (one shared capture). They are verified against mock venues:
+
+```bash
+uv run pytest tests/integration/test_ingest_faults.py tests/integration/test_crash.py
+TICKDB_STRESS_FACTOR=5 TICKDB_STRESS_SECONDS=20 \
+  TICKDB_STRESS_OUT=results/stress/<date>-x5.jsonl uv run pytest tests/integration/test_stress.py
+```
+
+The 5x run on 2026-11-10 (WSL, reference PC, `nice 10`) is in
+`results/stress/2026-11-10-x5.jsonl`:
+
+| Venue | Target msg/s (5x peak) | Achieved | Frames sent = spooled | Loop lag p99 | Queued within 5 ms |
+|---|---|---|---|---|---|
+| binance-usdm | 5,080 | 5,085 | 101,708 = 101,708 | 1.13 ms | 100 % |
+| kraken (depth 1000) | 7,795 | 7,803 | 156,065 = 156,065 | 1.16 ms | 100 % |
+| coinbase (5,000-level book) | 1,770 | 1,774 | 35,488 = 35,488 | 1.15 ms | 99.992 % |
+
 ## Incidents and owner steps
 
 | Date (UTC) | Event |
@@ -76,6 +101,7 @@ The cron entry (WSL crontab of user `ze`; remove it after 2026-12-09):
 | 2026-11-09 | `docker` inside Ubuntu cannot reach the daemon: `/var/run/docker.sock` (dated 2026-11-03) has no engine behind it, while `docker.exe` on Windows works. Docker Desktop's WSL integration for Ubuntu needs re-enabling by the owner (Settings → Resources → WSL integration → Ubuntu, Apply & restart). `make up` waits on this. |
 | 2026-11-10 02:21 | Raw mirror backlog run (deploy clone at `ae7e4eb`): 365 files, 5.16 GB copied, no errors, 71 Binance `bookTicker` files skipped by design. `tickdb mirror status` shows 2026-11-08 and 11-09 complete on all three venues; every 11-08 copy (173 files) matches its source by SHA-256. Deploy clone updated to `e0712ef`. Installing the hourly cron entry from this session was refused, so the owner adds it (line above). Until then nothing copies new hours; each closed hour must be copied within 7 days of its date. |
 | 2026-11-09 | M1 stack check through Docker Desktop from Windows (`docker.exe compose`, a throwaway project, throwaway passwords in the shell, an empty test data folder, since removed): ClickHouse, Prometheus and Grafana all reached `healthy`; the 4 ClickHouse integration tests passed (user `tickdb` works, `default` refused, memory ratio 0.5); Prometheus target up; Grafana 13.2.5 healthy with `grafana-clickhouse-datasource` 4.23.4 installed and anonymous API access refused (401). Bind mounts through the `\\wsl.localhost` path need the containers' user set to root, so they are not representative: the real run is `make up` from Ubuntu once the integration is back. |
+| 2026-11-10 19:25 | **First cron mirror run** (deploy clone `4f3fe19`): started 19:25:01, 267 s, 263 files, 2.13 GB copied (11-10 hours 02 to 18), 365 already present, no errors. `tickdb mirror status`: every closed hour of 11-08 to 11-10 copied. Recorder ingest p99 (`scripts/recorder_impact.py`, run minutes against the 30 minutes before): median binance-usdm 215 vs 207 µs, coinbase 230 vs 266 µs, kraken 167 vs 162 µs; every maximum during the run lower than before it. **24 h soak of the mirror starts with this run** and ends after the 2026-11-11 19:25 run. |
 
 ## Tests that need local resources
 

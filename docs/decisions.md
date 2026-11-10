@@ -137,3 +137,43 @@ the build. `DECISIONS.md` overrides the spec, and the spec overrides `README.md`
 4. **Deployment:** a clone on WSL ext4 at `~/tick-data-platform-deploy` with its own uv venv,
    so the job survives a broken `/mnt/d` mount. It runs under cron; see
    [operations](operations.md).
+5. **Ingestors are built and tested, never run live.** FR-01 to FR-04 are implemented in
+   `tickdb.ingest` and exercised against local mock venues (`tests/integration/`). While
+   `capture.mode` is `shared`, `tickdb ingest run` refuses any websocket or REST endpoint that
+   is not on this host, so no second recorder can start by accident.
+6. **Hook signatures carry the connection.** The spec's names are kept (`subscribe`,
+   `on_frame`, `resync`), each with the `Conn` it applies to: make-before-break rotation has
+   two live connections for a moment, and each keeps its own book state.
+7. **Parse after the stamp.** `ts_recv = time.time_ns()` is taken before anything else. The
+   adapter then parses the frame to label its channel and symbol in the spool record and to
+   check sequences, and only then is the record queued. The delay this adds is measured
+   (`tickdb_ingest_delay_seconds`): at 5x peak, more than 99.99 % of frames were queued within
+   5 ms (NFR-02).
+8. **Spool events** (`kind: "event"`, channel `control`) that M3's gap detection reads:
+   `connect`, `subscribe`, `disconnect`, `gap_open` (per stream on an unplanned close),
+   `silence`, `seq_gap`, `checksum_fail`, `crossed`, `protocol`, `trade_id_gap`,
+   `resync_start`, `resync_done`, `rotate`, `rotate_failed`, `reconnect_wait`,
+   `connect_failed`, `clock`, `rest_error`.
+9. **Coinbase integrity without a sequence.** `level2_batch` carries no sequence number, so
+   the checks are: a snapshot before any update, no crossed book after an update (else
+   resubscribe), the silence watchdog, and REST checkpoints every 600 s. `matches` trade ids
+   are contiguous per product, so a hole is a `trade_id_gap`.
+10. **Kraken numbers are read as their wire text** (`json.loads(..., parse_float=str)`),
+    because the CRC32 covers that text, trailing zeros included.
+11. **Stress rates come from this PC's capture.** The peak 1-minute rate of the streams this
+    project subscribes to, read from the shared raw archive on 2026-11-10: binance-usdm 1,016
+    msg/s (aggTrade + depth, 2026-11-04 15h), kraken 1,559 (book + trade, 11-05 15h),
+    coinbase 354 (11-08 21h). The recorder's own venue rate for Binance (up to 10,571 msg/s)
+    is mostly `bookTicker`, which this project doesn't subscribe to. The local run uses 5x
+    those rates; CI runs 1x, since shared runners are not the reference hardware.
+12. **Book state keeps sorted price lists** per side, so best price, top-N and truncation
+    don't scan the book: a full Coinbase book has thousands of levels, and the Kraken book is
+    at depth 1000.
+13. **The 24 h soak is a soak of the mirror job,** because no ingestor runs live. Pass
+    criteria: at least 24 hourly runs in 24 h, none with errors or a stop, no closed hour
+    missing (`tickdb mirror status`), every copied file matching its manifest hash with every
+    zstd frame decoding (`tickdb mirror verify`; a frame the recorder itself cut in a crash is
+    reported, not counted as a failure), and the recorder's per-minute ingest p99 during
+    mirror runs no worse than otherwise (`scripts/recorder_impact.py`).
+14. **Capture Day 1 is 2026-11-08** (owner ruling of 2026-11-10); the 30-day window is
+    2026-11-08 to 2026-12-07.

@@ -240,3 +240,84 @@ def test_cli_to_date_limits_copy(source: Path, tmp_path: Path) -> None:
 def test_cli_bad_date(tmp_path: Path) -> None:
     args = ["mirror", "status", "--from", "nope", "--dest", str(tmp_path)]
     assert CliRunner().invoke(cli.app, args).exit_code == cli.EXIT_CONFIG
+
+
+def _zst_source(tmp_path: Path) -> Path:
+    import zstandard
+
+    c = zstandard.ZstdCompressor()
+    whole = c.compress(b"1\t{}\n2\t{}\n")
+    cut = c.compress(b"3\t{}\n" * 50)[:-5]
+    return make_source(
+        tmp_path / "zsrc",
+        {
+            f"kraken/2026-11-08/00-ws.g1-{RUN}.jsonl.zst": whole,
+            f"kraken/2026-11-08/01-ws.g1-{RUN}.jsonl.zst": whole + cut,
+        },
+    )
+
+
+def test_verify_rehashes_and_decodes(tmp_path: Path) -> None:
+    source = _zst_source(tmp_path)
+    dest = tmp_path / "dst"
+    run(source, dest)
+    good = mirror.verify(dest, DAY)
+    assert good.files == 2
+    assert good.hash_ok == 2
+    assert good.complete_frames == 1
+    assert len(good.cut_frames) == 1  # the recorder's own crash-cut file, copied as is
+    assert good.lines >= 4
+    victim = next(dest.rglob(f"00-ws.g1-{RUN}.jsonl.zst"))
+    victim.write_bytes(victim.read_bytes()[:-1] + b"x")
+    (victim.parent / "stray.jsonl.zst").write_bytes(b"")
+    bad = mirror.verify(dest, DAY)
+    assert bad.hash_bad == (f"kraken/00-ws.g1-{RUN}.jsonl.zst",)
+    assert bad.unlisted == ("kraken/stray.jsonl.zst",)
+
+
+def test_run_log_report(tmp_path: Path) -> None:
+    log = tmp_path / "run.log"
+    lines = [
+        {"copied": 3, "copied_bytes": 30, "errors": [], "stopped": "", "seconds": 4.0,
+         "utc": "2026-11-10T19:26:00+00:00"},
+        "not json",
+        {"copied": 2, "copied_bytes": 20, "errors": ["x"], "stopped": "", "seconds": 9.5,
+         "utc": "2026-11-10T20:26:00+00:00"},
+        {"copied": 1, "copied_bytes": 10, "errors": [], "stopped": "floor",
+         "utc": "2026-11-10T23:26:00+00:00"},
+    ]  # fmt: skip
+    log.write_text(
+        "\n".join(x if isinstance(x, str) else orjson.dumps(x).decode() for x in lines) + "\n"
+    )
+    since = datetime(2026, 11, 10, 19, 0, tzinfo=UTC)
+    report = mirror.run_log_report(log, since)
+    assert report["runs"] == 3
+    assert report["copied_files"] == 6
+    assert report["runs_with_errors"] == 1
+    assert report["runs_stopped"] == 1
+    assert report["max_hours_between_runs"] == 3.0
+    assert report["max_run_seconds"] == 9.5
+    until = datetime(2026, 11, 10, 21, 0, tzinfo=UTC)
+    assert mirror.run_log_report(log, since, until)["runs"] == 2
+
+
+@unix_only
+def test_cli_verify_and_report(tmp_path: Path) -> None:
+    source = _zst_source(tmp_path)
+    dest = tmp_path / "dst"
+    runner = CliRunner()
+    args = ["mirror", "run", "--source", str(source), "--dest", str(dest), "--grace-s", "0"]
+    assert runner.invoke(cli.app, [*args, "--rate-mb", "0"]).exit_code == 0
+    (dest / "meta" / "mirror" / "run.log").write_text(
+        orjson.dumps({"copied": 2, "copied_bytes": 1, "errors": [], "stopped": "",
+                      "utc": "2026-11-10T19:26:00+00:00"}).decode() + "\n"
+    )  # fmt: skip
+    verify = runner.invoke(
+        cli.app, ["mirror", "verify", "--dest", str(dest), "--to", "2026-11-09", "--rate-mb", "0"]
+    )
+    assert verify.exit_code == 0, verify.output
+    assert orjson.loads(verify.stdout.splitlines()[0])["hash_ok"] == 2
+    report = runner.invoke(
+        cli.app, ["mirror", "report", "--dest", str(dest), "--since", "2026-11-10T00:00:00+00:00"]
+    )
+    assert orjson.loads(report.stdout)["runs"] == 1
