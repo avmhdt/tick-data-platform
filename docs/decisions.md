@@ -50,6 +50,15 @@ the build. `DECISIONS.md` overrides the spec, and the spec overrides `README.md`
   time.cloudflare.com. Don't let Ubuntu's chronyd steer the clock.
 - **Publishing:** aggregates only. No AI attribution anywhere.
 
+### Owner rulings during the build
+
+| Date | Item | Ruling |
+|---|---|---|
+| 2026-11-10 | AC-W-01 30-day window (M2) | Owner, quoted: "Yes, I'll extend it (Recommended)". The window is **2026-11-08 to 2026-12-07**. The owner extends the Windows Update pause (or sets notify-only) through about 2026-12-15; crypto-lob-alpha's session keeps `lob-recorder` running to at least 2026-12-08. This project never touches the recorder. A light read-only copy of the shared raw archive starts from 2026-11-08 at once, so those days survive the recorder's 7-day raw cleanup. |
+| 2026-11-09 | Retention cuts (D-10, D-11) | Owner, quoted: "Approve the cuts (Recommended)". Raw spool copies are kept **7 days** (spec default 30), still deleted only after that day's verify and replay hash pass. ClickHouse `book_l2` TTL is **14 days** (spec default 90), reloadable from Parquet. Trades, BBO, bars, the Parquet archive, gaps and DQ results keep full retention. Recorded as deviations from the spec defaults. |
+| 2026-11-10 | Owner location | The owner is in Brazil, not the Cayman Islands, with no VPN or proxy. The M1 smoke test (2026-11-09) therefore ran from Brazil: all three venues reachable over websocket and REST, no geo-block, no auth. Nothing in this project's venue access depends on the declared country. |
+| 2026-11-11 | AC-W-01 window after the host crash | The whole PC crashed: WSL was down from about 07:00 to 19:37:54 UTC on 2026-11-11 (about 12.6 h on every stream), far over the 72 min a day allows, so the window 2026-11-08 to 12-07 cannot pass. It is published as a failed first window (finding: host crash on 11-11). Owner, quoted: "Move both to 11-12 (Recommended)". **The 30-day window is 2026-11-12 to 2026-12-11**; the shared recorder runs to at least 2026-12-12 02:00 UTC (crypto-lob-alpha's session records that), within the Windows Update pause to about 2026-12-15 (3 days of slack). Thresholds unchanged. The mirror's cron line becomes `--to 2026-12-11`, removed after 2026-12-13 (owner edits the crontab). |
+
 ## Spec decisions (section 3)
 
 | ID | Decision | Status |
@@ -59,12 +68,12 @@ the build. `DECISIONS.md` overrides the spec, and the spec overrides `README.md`
 | D-03 | VPS spend | Resolved 2026-10-31: not needed, USD 0. |
 | D-04 | Databento spend | Default: not approved. |
 | D-05 | Symbols | Default: BTC, ETH, SOL per venue, venue-native symbols (9 streams). |
-| D-06 | Book depth | Default: Binance USD-M `depth@100ms` + 1000-level snapshot; Coinbase level2 (`level2_batch` on the Exchange feed, see below); Kraken depth 100. |
+| D-06 | Book depth | Binance USD-M `depth@100ms` + 1000-level snapshot; Coinbase level2 (`level2_batch` on the Exchange feed, see below); Kraken **1000**, not the default 100, because that is what the shared capture subscribes to (agent decision, M2). |
 | D-07 | kdb+ comparison | Default: skip. |
 | D-08 | Public DQ dashboard | Default (a): static DQ site on GitHub Pages, aggregates only. |
 | D-09 | ITCH fallback | Default: defer FR-25 if itch-feed-handler output is missing. Its output exists (see above). |
-| D-10 | Raw spool retention | Default: 30 days, deleted only after verify and replay pass. |
-| D-11 | ClickHouse `book_l2` TTL | Default: 90 days. |
+| D-10 | Raw spool retention | **7 days** (owner decision 2026-11-09, spec default 30), deleted only after verify and replay pass. |
+| D-11 | ClickHouse `book_l2` TTL | **14 days** (owner decision 2026-11-09, spec default 90). |
 | D-12 | Docker runtime | Resolved 2026-10-31: Docker Desktop with WSL2 backend. |
 | D-13 | Licence | Default: MIT (`LICENSE`, `license = "MIT"` in `pyproject.toml`). |
 | D-14 | Ingestor language | Fixed: Python 3.12 asyncio. |
@@ -108,3 +117,64 @@ the build. `DECISIONS.md` overrides the spec, and the spec overrides `README.md`
 10. **WSL virtualenv.** `make` targets use `UV_PROJECT_ENVIRONMENT=~/.cache/tickdb/venv` on WSL
     ext4, so the repo on `/mnt/d` holds no Linux build tree and Windows and WSL environments
     don't collide.
+
+### M2 (2026-11-10)
+
+1. **The raw spool is a mirror of the shared capture.** `tickdb mirror run` copies each closed
+   hour of `~/data/crypto-lob-alpha/raw/ws/venue=<v>/date=<D>/<HH>-<group>-<run>.jsonl.zst`
+   byte for byte to `$DATA_ROOT/raw/external/lob-alpha/` (spec 7d's `raw/external/`), with a
+   manifest line per file (bytes, SHA-256) in `meta/mirror/date=<D>.jsonl`. The files keep the
+   recorder's own line format (`ts_recv	payload` for frames, `ts_recv	!<json>	<body>` for
+   control records), which M3's normalizers read directly. Re-encoding them into the spec's
+   spool record would double the I/O on the shared HDD for no gain: the payloads are already
+   verbatim and stamped before parsing.
+2. **What is copied:** everything except Binance `bookTicker` groups (`ticker.*`, about 2 GB a
+   day), because `bbo` is derived from the book (FR-08). Only hours that ended at least 10
+   minutes ago; a copy with the same size is skipped; copies are fsynced and renamed into place.
+3. **Load on the shared PC:** reads capped at 8 MB/s, `nice 10`, `ionice` idle, one run at a
+   time (file lock), at hh:25 so it doesn't overlap vol-surface-modeling's hh:15 job. The run
+   stops before D: would fall under 150 GB, if D:'s free space can't be read, or if free memory
+   falls under 30 GB.
+4. **Deployment:** a clone on WSL ext4 at `~/tick-data-platform-deploy` with its own uv venv,
+   so the job survives a broken `/mnt/d` mount. It runs under cron; see
+   [operations](operations.md).
+5. **Ingestors are built and tested, never run live.** FR-01 to FR-04 are implemented in
+   `tickdb.ingest` and exercised against local mock venues (`tests/integration/`). While
+   `capture.mode` is `shared`, `tickdb ingest run` refuses any websocket or REST endpoint that
+   is not on this host, so no second recorder can start by accident.
+6. **Hook signatures carry the connection.** The spec's names are kept (`subscribe`,
+   `on_frame`, `resync`), each with the `Conn` it applies to: make-before-break rotation has
+   two live connections for a moment, and each keeps its own book state.
+7. **Parse after the stamp.** `ts_recv = time.time_ns()` is taken before anything else. The
+   adapter then parses the frame to label its channel and symbol in the spool record and to
+   check sequences, and only then is the record queued. The delay this adds is measured
+   (`tickdb_ingest_delay_seconds`): at 5x peak, more than 99.99 % of frames were queued within
+   5 ms (NFR-02).
+8. **Spool events** (`kind: "event"`, channel `control`) that M3's gap detection reads:
+   `connect`, `subscribe`, `disconnect`, `gap_open` (per stream on an unplanned close),
+   `silence`, `seq_gap`, `checksum_fail`, `crossed`, `protocol`, `trade_id_gap`,
+   `resync_start`, `resync_done`, `rotate`, `rotate_failed`, `reconnect_wait`,
+   `connect_failed`, `clock`, `rest_error`.
+9. **Coinbase integrity without a sequence.** `level2_batch` carries no sequence number, so
+   the checks are: a snapshot before any update, no crossed book after an update (else
+   resubscribe), the silence watchdog, and REST checkpoints every 600 s. `matches` trade ids
+   are contiguous per product, so a hole is a `trade_id_gap`.
+10. **Kraken numbers are read as their wire text** (`json.loads(..., parse_float=str)`),
+    because the CRC32 covers that text, trailing zeros included.
+11. **Stress rates come from this PC's capture.** The peak 1-minute rate of the streams this
+    project subscribes to, read from the shared raw archive on 2026-11-10: binance-usdm 1,016
+    msg/s (aggTrade + depth, 2026-11-04 15h), kraken 1,559 (book + trade, 11-05 15h),
+    coinbase 354 (11-08 21h). The recorder's own venue rate for Binance (up to 10,571 msg/s)
+    is mostly `bookTicker`, which this project doesn't subscribe to. The local run uses 5x
+    those rates; CI runs 1x, since shared runners are not the reference hardware.
+12. **Book state keeps sorted price lists** per side, so best price, top-N and truncation
+    don't scan the book: a full Coinbase book has thousands of levels, and the Kraken book is
+    at depth 1000.
+13. **The 24 h soak is a soak of the mirror job,** because no ingestor runs live. Pass
+    criteria: at least 24 hourly runs in 24 h, none with errors or a stop, no closed hour
+    missing (`tickdb mirror status`), every copied file matching its manifest hash with every
+    zstd frame decoding (`tickdb mirror verify`; a frame the recorder itself cut in a crash is
+    reported, not counted as a failure), and the recorder's per-minute ingest p99 during
+    mirror runs no worse than otherwise (`scripts/recorder_impact.py`).
+14. **Capture Day 1 is 2026-11-12** (owner ruling of 2026-11-11, after the host crash; the
+    first window, 2026-11-08 to 12-07, failed). The 30-day window is 2026-11-12 to 2026-12-11.
