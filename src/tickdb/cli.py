@@ -526,3 +526,38 @@ def replay_cmd(
         typer.echo(json.dumps(report))
         ok &= report["ok"]
     raise typer.Exit(EXIT_OK if ok or not verify else EXIT_MISMATCH)
+
+
+@app.command("load")
+def load_cmd(
+    date_: DateOpt,
+    venue: VenueOpt = None,
+    dest: DestOpt = None,
+    config: ConfigOpt = None,
+) -> None:
+    """Parquet -> ClickHouse for one UTC day via REPLACE PARTITION, with a post-load check.
+
+    Exit 2 if a ClickHouse fingerprint differs from the Parquet files.
+
+    Example: tickdb load --date 2026-11-12
+    """
+    from datetime import date as _date
+
+    from tickdb.load import clickhouse as ch
+
+    settings, cfg = _load(config)
+    if settings.clickhouse_password is None:
+        typer.echo("CLICKHOUSE_PASSWORD is not set in .env (P-06)", err=True)
+        raise typer.Exit(EXIT_CONFIG)
+    root = dest or Path(cfg.data_root).expanduser()
+    client = ch.connect_settings(settings)
+    ch.apply_schema(client)
+    ok = True
+    for name in _venue_list(cfg, venue):
+        report = ch.load_venue_day(
+            client, root, name, _date.fromisoformat(date_), tuple(cfg.venues[name].symbols)
+        )
+        rows = {t: v["rows"] for t, v in report.tables.items()}
+        typer.echo(json.dumps({"venue": name, "date": date_, "ok": report.ok, "rows": rows}))
+        ok &= report.ok
+    raise typer.Exit(EXIT_OK if ok else EXIT_MISMATCH)
