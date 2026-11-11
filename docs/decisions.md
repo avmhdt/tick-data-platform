@@ -57,6 +57,7 @@ the build. `DECISIONS.md` overrides the spec, and the spec overrides `README.md`
 | 2026-11-10 | AC-W-01 30-day window (M2) | Owner, quoted: "Yes, I'll extend it (Recommended)". The window is **2026-11-08 to 2026-12-07**. The owner extends the Windows Update pause (or sets notify-only) through about 2026-12-15; crypto-lob-alpha's session keeps `lob-recorder` running to at least 2026-12-08. This project never touches the recorder. A light read-only copy of the shared raw archive starts from 2026-11-08 at once, so those days survive the recorder's 7-day raw cleanup. |
 | 2026-11-09 | Retention cuts (D-10, D-11) | Owner, quoted: "Approve the cuts (Recommended)". Raw spool copies are kept **7 days** (spec default 30), still deleted only after that day's verify and replay hash pass. ClickHouse `book_l2` TTL is **14 days** (spec default 90), reloadable from Parquet. Trades, BBO, bars, the Parquet archive, gaps and DQ results keep full retention. Recorded as deviations from the spec defaults. |
 | 2026-11-10 | Owner location | The owner is in Brazil, not the Cayman Islands, with no VPN or proxy. The M1 smoke test (2026-11-09) therefore ran from Brazil: all three venues reachable over websocket and REST, no geo-block, no auth. Nothing in this project's venue access depends on the declared country. |
+| 2026-11-11 | AC-W-01 window after the host crash | The whole PC crashed: WSL was down from about 07:00 to 19:37:54 UTC on 2026-11-11 (about 12.6 h on every stream), far over the 72 min a day allows, so the window 2026-11-08 to 12-07 cannot pass. It is published as a failed first window (finding: host crash on 11-11). Owner, quoted: "Move both to 11-12 (Recommended)". **The 30-day window is 2026-11-12 to 2026-12-11**; the shared recorder runs to at least 2026-12-12 02:00 UTC (crypto-lob-alpha's session records that), within the Windows Update pause to about 2026-12-15 (3 days of slack). Thresholds unchanged. The mirror's cron line becomes `--to 2026-12-11`, removed after 2026-12-13 (owner edits the crontab). |
 
 ## Spec decisions (section 3)
 
@@ -175,5 +176,5 @@ the build. `DECISIONS.md` overrides the spec, and the spec overrides `README.md`
     zstd frame decoding (`tickdb mirror verify`; a frame the recorder itself cut in a crash is
     reported, not counted as a failure), and the recorder's per-minute ingest p99 during
     mirror runs no worse than otherwise (`scripts/recorder_impact.py`).
-14. **Capture Day 1 is 2026-11-08** (owner ruling of 2026-11-10); the 30-day window is
-    2026-11-08 to 2026-12-07.
+14. **Capture Day 1 is 2026-11-12** (owner ruling of 2026-11-11, after the host crash; the
+    first window, 2026-11-08 to 12-07, failed). The 30-day window is 2026-11-12 to 2026-12-11.

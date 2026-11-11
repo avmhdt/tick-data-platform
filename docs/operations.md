@@ -71,9 +71,13 @@ The cron entry (WSL crontab of user `ze`; remove it after 2026-12-09):
 
 ## Capture window
 
-**Day 1 is 2026-11-08** (owner ruling, 2026-11-10). The 30-day AC-W-01 window runs from
-2026-11-08 00:00 to 2026-12-07 24:00 UTC. The shared recorder keeps running to at least
-2026-12-08, and the Windows Update pause is extended through about 2026-12-15.
+**Day 1 is 2026-11-12** (owner ruling, 2026-11-11). The 30-day AC-W-01 window runs from
+2026-11-12 00:00 to 2026-12-11 24:00 UTC. The shared recorder keeps running to at least
+2026-12-12 02:00 UTC, within the Windows Update pause to about 2026-12-15.
+
+The first window, 2026-11-08 to 2026-12-07 (ruling of 2026-11-10), **failed** on 2026-11-11:
+the whole PC crashed and WSL was down from about 07:00 to 19:37:54 UTC, about 12.6 h on every
+stream against the 72 min a day allows. It is published as a finding.
 
 ## Ingestor tests (M2)
 
@@ -102,6 +106,7 @@ The 5x run on 2026-11-10 (WSL, reference PC, `nice 10`) is in
 | 2026-11-10 02:21 | Raw mirror backlog run (deploy clone at `ae7e4eb`): 365 files, 5.16 GB copied, no errors, 71 Binance `bookTicker` files skipped by design. `tickdb mirror status` shows 2026-11-08 and 11-09 complete on all three venues; every 11-08 copy (173 files) matches its source by SHA-256. Deploy clone updated to `e0712ef`. Installing the hourly cron entry from this session was refused, so the owner adds it (line above). Until then nothing copies new hours; each closed hour must be copied within 7 days of its date. |
 | 2026-11-09 | M1 stack check through Docker Desktop from Windows (`docker.exe compose`, a throwaway project, throwaway passwords in the shell, an empty test data folder, since removed): ClickHouse, Prometheus and Grafana all reached `healthy`; the 4 ClickHouse integration tests passed (user `tickdb` works, `default` refused, memory ratio 0.5); Prometheus target up; Grafana 13.2.5 healthy with `grafana-clickhouse-datasource` 4.23.4 installed and anonymous API access refused (401). Bind mounts through the `\\wsl.localhost` path need the containers' user set to root, so they are not representative: the real run is `make up` from Ubuntu once the integration is back. |
 | 2026-11-10 19:25 | **First cron mirror run** (deploy clone `4f3fe19`): started 19:25:01, 267 s, 263 files, 2.13 GB copied (11-10 hours 02 to 18), 365 already present, no errors. `tickdb mirror status`: every closed hour of 11-08 to 11-10 copied. Recorder ingest p99 (`scripts/recorder_impact.py`, run minutes against the 30 minutes before): median binance-usdm 215 vs 207 µs, coinbase 230 vs 266 µs, kraken 167 vs 162 µs; every maximum during the run lower than before it. **24 h soak of the mirror starts with this run** and ends after the 2026-11-11 19:25 run. |
+| 2026-11-11 07:00-19:38 | **Host crash.** WSL down about 12.6 h; the recorder restarted at 19:38:56 UTC and the mirror cron came back with it (no hour lost: the recorder was down too). The mirror's 24 h soak, 12 clean runs in (11-10 19:25 to 11-11 06:25), was cut by the host, not by a job error, and restarts with the 20:25 run; judged after the 2026-11-12 20:25 run. The interrupted 11-07 copy was finished at 19:49 (163 files, 0.95 GB, no errors). |
 
 ## Tests that need local resources
 
