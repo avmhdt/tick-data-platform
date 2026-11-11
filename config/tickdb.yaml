@@ -40,7 +40,7 @@ venues:
     symbols: [BTC/USD, ETH/USD, SOL/USD]   # partition dirs percent-encode '/'
     channels: [trades, book_l2]
     trades: {stream: trade}
-    book: {stream: book, depth: 100, checksum: true}
+    book: {stream: book, depth: 1000, checksum: true}   # D-06: what the shared capture subscribes
     metrics_port: 9103
 
 reconnect: {base_s: 1.0, factor: 2.0, cap_s: 60.0, jitter: full, stable_reset_s: 300}
