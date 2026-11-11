@@ -63,6 +63,11 @@ def binance_day(root: Path) -> Path:
     snap2 = {"lastUpdateId": 122, "T": t0 + 5500, "bids": [["98.0", "1.0"]], "asks": [["102.0", "1.0"]]}  # fmt: skip
     raw.control(5.5, {"k": "snapshot", "symbol": "BTCUSDT"}, snap2)
     raw.frame(6.0, "public.g1", _depth("BTCUSDT", 124, 125, 123, t0 + 6000))
+    # sequence-aligned checkpoints once the book is known: untouched level 98.0 must match
+    good = {"lastUpdateId": 125, "T": t0 + 6500, "bids": [["100.0", "1.0"], ["98.0", "1.0"]], "asks": [["101.0", "2.0"]]}
+    bad = {**good, "bids": [["98.0", "7.0"]]}
+    raw.control(6.5, {"k": "checkpoint", "symbol": "BTCUSDT", "checkpoint": "rest_l2"}, good)
+    raw.control(6.6, {"k": "checkpoint", "symbol": "BTCUSDT", "checkpoint": "rest_l2"}, bad)
     # trades on two market connections during a make-before-break: duplicates removed
     raw.frame(1.0, "market.g1", _agg("BTCUSDT", 500, t0 + 1000, maker=True))
     raw.control(1.5, {"k": "conn_open", "conn": "market.g2", "logical": "market", "standby": True})
@@ -107,6 +112,8 @@ def test_binance_bridge_gap_and_dedupe(tmp_path: Path) -> None:
     assert [t["side"] for t in trades] == [-1, 1, -1]
     assert result.counters["dup_trades_removed"] == 1
     assert result.counters["ticker_frames_skipped"] == 1
+    assert result.counters["ckpt_match"] == 1
+    assert result.counters["ckpt_mismatch"] == 1
     end = load_book_end(data, "binance-usdm", DAY)["BTCUSDT"]
     assert end["known"] is True
     assert end["last_u"] == 125
@@ -149,6 +156,9 @@ def coinbase_day(root: Path) -> Path:
     raw.frame(3.1, "ws.g2", {"type": "snapshot", "product_id": "BTC-USD",
                              "bids": [["99.00", "2.0"]], "asks": [["101.00", "3.0"]]})  # fmt: skip
     raw.frame(3.2, "ws.g2", upd(2, "sell", "101.00", "0"))
+    body = {"bids": [["99.00", "2.0", 1]], "asks": [], "sequence": 1}
+    raw.control(5.0, {"k": "checkpoint", "symbol": "BTC-USD", "checkpoint": "rest_l2"}, body)
+    raw.frame(6.0, "ws.g2", {"type": "heartbeat", "product_id": "BTC-USD", "sequence": 9})
     return raw.write()
 
 
@@ -164,6 +174,7 @@ def test_coinbase_unknown_book_is_archived_and_gap_recovered(tmp_path: Path) -> 
         (False, "ws.g2", 0.0),
     ]
     assert result.counters["updates_book_unknown"] == 1
+    assert result.counters["ckpt_match"] == 1
     kinds = {(g["channel"], g["kind"], g["status"]) for g in gaps(data, "coinbase")}
     assert ("book_l2", "disconnect", "partial") in kinds
     assert ("trades", "disconnect", "open") in kinds  # closes at end of day; backfill decides

@@ -17,12 +17,14 @@ order and replays to the correct book (docs/decisions.md, M3).
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any
 
 import orjson
 
 from tickdb.ingest.book import ASK, BID, L2Book
+from tickdb.normalize.checkpoints import compare
 from tickdb.normalize.engine import Engine, VenueNormalizer
 from tickdb.normalize.rawlog import RawRecord
 
@@ -72,6 +74,11 @@ class BinanceUsdmNormalizer(VenueNormalizer):
         super().__init__(engine)
         self.sync = {s: _Sync() for s in engine.symbols}
         self.books = {s: L2Book() for s in engine.symbols}
+        # recent applied diffs (final u, touched levels) and checkpoints waiting for the stream
+        self.recent: dict[str, deque[tuple[int, set[tuple[int, float]]]]] = {
+            s: deque(maxlen=2000) for s in engine.symbols
+        }
+        self.waiting: dict[str, list[dict[str, Any]]] = {s: [] for s in engine.symbols}
 
     # ------------------------------------------------------------------ control
 
@@ -114,9 +121,33 @@ class BinanceUsdmNormalizer(VenueNormalizer):
     def on_control(self, rec: RawRecord) -> None:
         ctrl = rec.ctrl or {}
         symbol = str(ctrl.get("symbol", ""))
-        if ctrl.get("k") == "checkpoint" and symbol in self.sync and not self.sync[symbol].known:
-            self._offer(symbol, rec, "checkpoint")
+        if ctrl.get("k") == "checkpoint" and symbol in self.sync:
+            if not self.sync[symbol].known:
+                self.engine.counters["ckpt_skipped"] += 1
+                self._offer(symbol, rec, "checkpoint")
+            else:
+                self.waiting[symbol].append(orjson.loads(rec.payload))
+                self._check_waiting(symbol)
         super().on_control(rec)
+
+    def _check_waiting(self, symbol: str) -> None:
+        """Compare checkpoints the stream has reached (sequence-aligned, DQ-04)."""
+        sync = self.sync[symbol]
+        if not self.waiting[symbol] or sync.last_u is None or not sync.known:
+            return
+        keep = []
+        for body in self.waiting[symbol]:
+            last_id = int(body["lastUpdateId"])
+            if sync.last_u < last_id:
+                keep.append(body)
+                continue
+            touched: set[tuple[int, float]] = set()
+            for final, levels in self.recent[symbol]:
+                if final >= last_id:
+                    touched |= levels
+            ok = compare(self.books[symbol], body, 100, touched)
+            self.engine.counters["ckpt_match" if ok else "ckpt_mismatch"] += 1
+        self.waiting[symbol] = keep
 
     def on_rest_snapshot(self, symbol: str, rec: RawRecord) -> None:
         if symbol in self.sync and not self.sync[symbol].known:
@@ -124,6 +155,8 @@ class BinanceUsdmNormalizer(VenueNormalizer):
 
     def _lose_sync(self, symbol: str, kind: str, ts: int) -> None:
         sync = self.sync[symbol]
+        self.engine.counters["ckpt_skipped"] += len(self.waiting[symbol])
+        self.waiting[symbol] = []
         if sync.synced or sync.known:
             self.engine.open_gap(symbol, "book_l2", kind, ts)
         self._flush(symbol, sync)
@@ -185,6 +218,8 @@ class BinanceUsdmNormalizer(VenueNormalizer):
         if sync.synced and sync.known:
             self._emit(symbol, diff, diff.ts_recv)
             sync.last_u = diff.final
+            if self.waiting[symbol]:
+                self._check_waiting(symbol)
             return
         if sync.synced:
             sync.last_u = diff.final
@@ -205,6 +240,7 @@ class BinanceUsdmNormalizer(VenueNormalizer):
         book = self.books[symbol]
         for side, price, qty in diff.levels:
             book.apply(side, price, qty)
+        self.recent[symbol].append((diff.final, {(s, float(p)) for s, p, _ in diff.levels}))
         self.engine.book(
             symbol, diff.ts_exchange, ts_recv, diff.final, False, diff.conn, diff.levels
         )
