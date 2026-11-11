@@ -433,3 +433,96 @@ def disk_project(
 
 if __name__ == "__main__":  # pragma: no cover
     app()
+
+
+# ---------------------------------------------------------------- compaction (M3)
+
+DateOpt = Annotated[str, typer.Option("--date", help="UTC date, YYYY-MM-DD.")]
+VenueOpt = Annotated[str | None, typer.Option("--venue", help="One venue; default all enabled.")]
+
+
+def _venue_list(cfg: TickdbConfig, venue: str | None) -> list[str]:
+    if venue is None:
+        return list(cfg.enabled_venues())
+    if venue not in cfg.venues:
+        typer.echo(f"unknown venue {venue!r}", err=True)
+        raise typer.Exit(EXIT_CONFIG)
+    return [venue]
+
+
+def _raw_root(data_root: Path, raw: Path | None) -> Path:
+    return raw or data_root / "raw" / "external" / "lob-alpha"
+
+
+@app.command("compact")
+def compact_cmd(
+    date_: DateOpt,
+    venue: VenueOpt = None,
+    dest: DestOpt = None,
+    raw: Annotated[Path | None, typer.Option(help="Raw root; default the shared mirror.")] = None,
+    config: ConfigOpt = None,
+) -> None:
+    """Spool -> Parquet for one UTC day (daily final partitions, manifests, gaps).
+
+    Example: tickdb compact --date 2026-11-09 --venue kraken
+    """
+    from datetime import date as _date
+
+    from tickdb.compact.compactor import compact_day
+
+    _, cfg = _load(config)
+    root = dest or Path(cfg.data_root).expanduser()
+    day = _date.fromisoformat(date_)
+    for name in _venue_list(cfg, venue):
+        vcfg = cfg.venues[name]
+        result = compact_day(
+            _raw_root(root, raw), root, name, day, tuple(vcfg.symbols),
+            kraken_depth=vcfg.book.depth or 1000,
+        )  # fmt: skip
+        typer.echo(
+            json.dumps(
+                {
+                    "venue": name,
+                    "date": date_,
+                    "seconds": result.seconds,
+                    "gaps": result.gaps,
+                    "rows": {k: v["rows"] for k, v in result.partitions.items()},
+                    "counters": result.counters,
+                }
+            )
+        )
+
+
+@app.command("replay")
+def replay_cmd(
+    date_: DateOpt,
+    verify: Annotated[bool, typer.Option("--verify/--no-verify", help="Compare hashes.")] = True,
+    keep_scratch: Annotated[bool, typer.Option(help="Keep the rebuilt partitions.")] = False,
+    venue: VenueOpt = None,
+    dest: DestOpt = None,
+    raw: Annotated[Path | None, typer.Option(help="Raw root; default the shared mirror.")] = None,
+    config: ConfigOpt = None,
+) -> None:
+    """Rebuild a day from the raw spool into scratch and compare content hashes (FR-10).
+
+    Exit 2 if any partition differs from the archive.
+
+    Example: tickdb replay --date 2026-11-09 --verify
+    """
+    from datetime import date as _date
+
+    from tickdb.compact.compactor import replay_verify
+
+    _, cfg = _load(config)
+    root = dest or Path(cfg.data_root).expanduser()
+    day = _date.fromisoformat(date_)
+    ok = True
+    for name in _venue_list(cfg, venue):
+        vcfg = cfg.venues[name]
+        report = replay_verify(
+            _raw_root(root, raw), root, name, day, tuple(vcfg.symbols),
+            keep_scratch=keep_scratch, kraken_depth=vcfg.book.depth or 1000,
+        )  # fmt: skip
+        typer.echo(json.dumps(report))
+        ok &= report["ok"]
+    raise typer.Exit(EXIT_OK if ok or not verify else EXIT_MISMATCH)
