@@ -56,7 +56,7 @@ def read_file(path: Path) -> Iterator[RawRecord]:
         stamp, _, rest = line.partition(b"\t")
         if not rest or not stamp.isdigit():
             continue
-        if conn == CONTROL:
+        if conn == CONTROL or conn.startswith("backfill"):
             meta, _, body = rest.removeprefix(b"!").partition(b"\t")
             yield RawRecord(int(stamp), conn, i, body, orjson.loads(meta))
         else:
@@ -68,8 +68,11 @@ def hour_files(root: Path, venue: str, day: date, hour: int) -> list[Path]:
     return sorted(base.glob(f"{hour:02d}-*.jsonl.zst"))
 
 
-def day_records(root: Path, venue: str, day: date) -> Iterator[RawRecord]:
-    """Every record of a UTC day in replay order, one hour at a time (bounded memory)."""
+def day_records(roots: Path | list[Path], venue: str, day: date) -> Iterator[RawRecord]:
+    """Every record of a UTC day in replay order, one hour at a time (bounded memory).
+    ``roots``: the mirrored capture and, optionally, the REST backfill spool."""
+    roots = roots if isinstance(roots, list) else [roots]
     for hour in range(24):
-        streams = [read_file(p) for p in hour_files(root, venue, day, hour)]
+        files = [p for root in roots for p in hour_files(root, venue, day, hour)]
+        streams = [read_file(p) for p in files]
         yield from heapq.merge(*streams, key=lambda r: (r.ts, r.conn, r.line))

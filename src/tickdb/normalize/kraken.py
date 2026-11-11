@@ -11,6 +11,7 @@ resubscribes and the next snapshot ends it. Numbers are read as wire text.
 from __future__ import annotations
 
 import json
+from decimal import Decimal
 from typing import Any
 
 import orjson
@@ -32,6 +33,21 @@ class KrakenNormalizer(PushBookNormalizer):
     def __init__(self, engine: Engine, depth: int = 1000) -> None:
         super().__init__(engine)
         self.depth = depth
+
+    def on_backfill(self, symbol: str, rec: RawRecord) -> None:
+        body = json.loads(rec.payload, parse_float=Decimal)
+        if body.get("error"):
+            return
+        rows: list[list[Any]] = next(
+            (v for k, v in body.get("result", {}).items() if k != "last"), []
+        )
+        for price, volume, when, side, *_rest in rows:
+            ts = int(Decimal(when) * 1_000_000_000)
+            trade_id = str(_rest[-1])
+            self.engine.trade(
+                symbol, ts, ts, trade_id, str(price), str(volume), 1 if side == "b" else -1,
+                "rest", rec.ts,
+            )  # fmt: skip
 
     def on_frame(self, rec: RawRecord) -> None:
         if b'"channel":"book"' in rec.payload:

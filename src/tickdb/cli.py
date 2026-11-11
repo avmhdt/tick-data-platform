@@ -604,3 +604,48 @@ def dq_summary(
 
     path = report.write_summary(out, _date.fromisoformat(from_), _date.fromisoformat(to))
     typer.echo(str(path))
+
+
+@app.command("backfill")
+def backfill_cmd(
+    date_: DateOpt,
+    venue: VenueOpt = None,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Only list what is missing.")] = False,
+    dest: DestOpt = None,
+    config: ConfigOpt = None,
+) -> None:
+    """REST backfill of the open trade gaps of a compacted day (FR-05); then re-run compact.
+
+    Example: tickdb backfill --date 2026-11-12 --venue kraken
+    """
+    from datetime import date as _date
+
+    from tickdb.ingest import backfill as bf
+
+    _, cfg = _load(config)
+    root = dest or Path(cfg.data_root).expanduser()
+    day = _date.fromisoformat(date_)
+    for name in _venue_list(cfg, venue):
+        needs = bf.plan(root, name, day)
+        report = {
+            "venue": name,
+            "gaps": len(needs),
+            "missing_ids": sum(n.hi - n.lo + 1 for n in needs),
+        }
+        if dry_run or not needs:
+            typer.echo(json.dumps(report))
+            continue
+        received, requests, spool = asyncio.run(_backfill(bf, name, cfg, needs, root, day))
+        report |= {"received": received, "requests": requests, "spool": spool}
+        typer.echo(json.dumps(report))
+
+
+async def _backfill(
+    bf: Any, name: str, cfg: TickdbConfig, needs: list[Any], root: Path, day: Any
+) -> tuple[int, int, str]:
+    filler = bf.Backfiller(name, cfg.venues[name].rest_url)
+    received = 0
+    for need in needs:
+        received += await filler.fetch(need)
+    await filler.http.aclose()
+    return received, filler.requests, str(filler.write(root, day))

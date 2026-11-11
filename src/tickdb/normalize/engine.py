@@ -9,7 +9,9 @@ needed and a day of hundreds of millions of book rows streams through bounded me
 
 from __future__ import annotations
 
+import bisect
 import hashlib
+import itertools
 from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -56,6 +58,7 @@ class Gap:
     seq_to: int | None = None
     recovery: str = "none"
     status: str = "open"
+    recovered_rows: int = 0
 
     def gap_id(self) -> str:
         key = f"{self.venue}|{self.symbol}|{self.channel}|{self.start_recv}|{self.kind}"
@@ -76,7 +79,7 @@ class Gap:
             "seq_to": self.seq_to,
             "recovery": self.recovery,
             "status": self.status,
-            "recovered_rows": 0,
+            "recovered_rows": self.recovered_rows,
         }
 
 
@@ -101,6 +104,7 @@ class Engine:
         self._batch_id = dict.fromkeys(self.symbols, 0)
         self._open: dict[tuple[str, str], Gap] = {}
         self.last_good: dict[tuple[str, str], int] = {}
+        self.backfilled: set[str] = set()  # symbols with a REST backfill attempt for the day
 
     # ------------------------------------------------------------------ rows
 
@@ -113,13 +117,18 @@ class Engine:
         price: str,
         qty: str,
         side: int,
+        source: str = "ws",
+        ts_fetch: int | None = None,
     ) -> None:
+        """One trade. Duplicates (same id) keep the first seen; ws rows come first in replay
+        order, so the source priority ws > rest of DQ-03 holds. REST rows carry
+        ``ts_recv = ts_exchange`` and the fetch time in ``ts_fetch`` (DQ-07)."""
         if symbol not in self._seen:
             self.counters["unknown_symbol"] += 1
             return
         seen = self._seen[symbol]
         if trade_id in seen:
-            self.counters["dup_trades_removed"] += 1  # same trade on two connections
+            self.counters["dup_trades_removed"] += 1
             return
         seen.add(trade_id)
         b = self._trades[symbol].cols
@@ -131,11 +140,12 @@ class Engine:
         b["price"].append(float(price))
         b["qty"].append(float(qty))
         b["side"].append(side)
-        b["source"].append("ws")
-        b["ts_fetch"].append(None)
-        self.good(symbol, "trades", ts_recv)
-        if len(self._trades[symbol]) >= self.flush_rows:
-            self.sink("trades", symbol, self._trades[symbol].take())
+        b["source"].append(source)
+        b["ts_fetch"].append(ts_fetch)
+        if source == "ws":
+            self.good(symbol, "trades", ts_recv)
+        else:
+            self.counters[f"trades_{source}"] += 1
 
     def book(
         self,
@@ -219,8 +229,6 @@ class Engine:
 
     def finish(self) -> None:
         for symbol in self.symbols:
-            if len(self._trades[symbol]):
-                self.sink("trades", symbol, self._trades[symbol].take())
             if len(self._book[symbol]):
                 self.sink("book_l2", symbol, self._book[symbol].take())
         for gap in self._open.values():  # still open at the end of the day
@@ -228,7 +236,69 @@ class Engine:
             gap.status = "open"
             self.gaps.append(gap)
         self._open.clear()
+        for symbol in self.symbols:
+            self._finish_trades(symbol)
         self.gaps.sort(key=lambda g: (g.symbol, g.channel, g.start_recv, g.kind))
+
+    def _finish_trades(self, symbol: str) -> None:
+        """Sort the day's trades into archive order (DQ-01) and classify trade gaps (DQ-06)."""
+        builder = self._trades[symbol]
+        if not len(builder):
+            return
+        cols = builder.cols
+        ids = [int(t) for t in cols["trade_id"]]
+        order = sorted(range(len(ids)), key=lambda i: (cols["ts_recv"][i], ids[i]))
+        for name in cols:
+            values = cols[name]
+            cols[name] = [values[i] for i in order]
+        ids = [ids[i] for i in order]
+        self._classify_trade_gaps(symbol, ids, cols["ts_recv"], cols["source"])
+        self.sink("trades", symbol, builder.take())
+
+    def _classify_trade_gaps(
+        self, symbol: str, ids: list[int], ts: list[int], source: list[str]
+    ) -> None:
+        present = set(ids)
+        ws = sorted((t, i) for i, t, s in zip(ids, ts, source, strict=True) if s == "ws")
+        ws_ts = [t for t, _ in ws]
+        ws_ids = sorted(i for _, i in ws)
+        prefix_max = list(itertools.accumulate((i for _, i in ws), max))
+        suffix_min = list(itertools.accumulate((i for _, i in reversed(ws)), min))[::-1]
+        covered: list[tuple[int, int]] = []
+        for gap in self.gaps:
+            if gap.symbol != symbol or gap.channel != "trades":
+                continue
+            k_before = bisect.bisect_right(ws_ts, gap.start_recv) - 1
+            k_after = bisect.bisect_left(ws_ts, gap.end_recv or self.end_ns)
+            if k_before < 0 or k_after >= len(ws):
+                continue  # no websocket trade on one side: the gap stays open
+            lo, hi = prefix_max[k_before] + 1, suffix_min[k_after] - 1
+            self._settle(symbol, gap, lo, hi, present)
+            covered.append((lo, hi))
+        # id holes in the websocket stream that no disconnect explains
+        for a, b in itertools.pairwise(ws_ids):
+            if b - a > 1 and not any(lo <= a + 1 and b - 1 <= hi for lo, hi in covered):
+                t0 = next(t for t, i in ws if i == a)
+                t1 = next(t for t, i in ws if i == b)
+                gap = Gap(self.venue, symbol, "trades", "trade_id_gap", t0, t1)
+                self._settle(symbol, gap, a + 1, b - 1, present)
+                self.gaps.append(gap)
+                self.counters["gap_trade_id_gap"] += 1
+
+    def _settle(self, symbol: str, gap: Gap, lo: int, hi: int, present: set[int]) -> None:
+        missing = max(0, hi - lo + 1)
+        got = sum(1 for i in range(lo, hi + 1) if i in present) if missing else 0
+        gap.seq_from, gap.seq_to = (lo, hi) if missing else (None, None)
+        gap.recovered_rows = got
+        if missing == 0 or got == missing:
+            gap.status = "recovered"
+            gap.recovery = "rest_backfill" if got else "none"
+        elif got:
+            gap.status, gap.recovery = "partial", "rest_backfill"
+        elif symbol in self.backfilled:
+            gap.status, gap.recovery = "unrecoverable", "rest_backfill"
+        else:
+            gap.status = "open"  # waiting for REST backfill
 
 
 class VenueNormalizer:
@@ -270,6 +340,9 @@ class VenueNormalizer:
             self.on_rest_snapshot(str(ctrl["symbol"]), rec)
         elif kind == "checkpoint":
             self.engine.counters["checkpoints"] += 1
+        elif kind == "rest_backfill" and "symbol" in ctrl:
+            self.engine.backfilled.add(str(ctrl["symbol"]))
+            self.on_backfill(str(ctrl["symbol"]), rec)
 
     def is_active(self, rec: RawRecord) -> bool:
         return rec.conn in self.active.values()
@@ -288,6 +361,9 @@ class VenueNormalizer:
 
     def on_frame(self, rec: RawRecord) -> None:
         raise NotImplementedError
+
+    def on_backfill(self, symbol: str, rec: RawRecord) -> None:
+        """REST trades fetched by ``tickdb backfill``; venues override."""
 
     def book_end(self) -> dict[str, dict[str, Any]]:
         """End-of-day book per symbol, the next day's ``carry``."""

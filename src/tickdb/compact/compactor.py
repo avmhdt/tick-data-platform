@@ -124,6 +124,7 @@ def normalize_to(
     *,
     kraken_depth: int = 1000,
     carry_root: Path | None = None,
+    backfill_root: Path | None = None,
 ) -> CompactResult:
     """Normalize a venue-day into partitions under ``out_root`` (staging or scratch)."""
     started = time.monotonic()
@@ -146,7 +147,8 @@ def normalize_to(
     engine = Engine(venue, day, symbols, sink, carry=carry)
     cls = NORMALIZERS[venue]
     normalizer = cls(engine, kraken_depth) if venue == "kraken" else cls(engine)  # type: ignore[call-arg]
-    for record in day_records(raw_root, venue, day):
+    roots = [raw_root, backfill_root] if backfill_root is not None else [raw_root]
+    for record in day_records(roots, venue, day):
         normalizer.feed(record)
     engine.finish()
     end_dir = out_root / "meta" / "book_end" / f"venue={venue}" / f"date={day.isoformat()}"
@@ -291,7 +293,14 @@ def compact_day(
     run = f"{venue}-{day.isoformat()}-{uuid.uuid4().hex[:8]}"
     staging = data_root / "interim" / "staging" / run
     result = normalize_to(
-        raw_root, staging, venue, day, symbols, kraken_depth=kraken_depth, carry_root=data_root
+        raw_root,
+        staging,
+        venue,
+        day,
+        symbols,
+        kraken_depth=kraken_depth,
+        carry_root=data_root,
+        backfill_root=data_root / "raw" / "backfill",
     )
     derive_bbo_into(staging, venue, day, symbols, result)
     derive_bars_into(staging, (staging, data_root), venue, day, symbols, result)
@@ -343,7 +352,14 @@ def replay_verify(
     """Rebuild a day into scratch and compare content hashes with the archive (FR-10)."""
     scratch = data_root / "interim" / "replay" / f"{venue}-{day.isoformat()}-{uuid.uuid4().hex[:8]}"
     result = normalize_to(
-        raw_root, scratch, venue, day, symbols, kraken_depth=kraken_depth, carry_root=data_root
+        raw_root,
+        scratch,
+        venue,
+        day,
+        symbols,
+        kraken_depth=kraken_depth,
+        carry_root=data_root,
+        backfill_root=data_root / "raw" / "backfill",
     )
     derive_bbo_into(scratch, venue, day, symbols, result)
     derive_bars_into(scratch, (scratch, data_root), venue, day, symbols, result)

@@ -22,6 +22,14 @@ from tickdb.timeutil import iso_to_ns
 class CoinbaseNormalizer(PushBookNormalizer):
     venue = "coinbase"
 
+    def on_backfill(self, symbol: str, rec: RawRecord) -> None:
+        for t in orjson.loads(rec.payload):
+            ts = iso_to_ns(t["time"])
+            side = 1 if t["side"] == "sell" else -1  # maker side, as on the websocket
+            self.engine.trade(
+                symbol, ts, ts, str(t["trade_id"]), t["price"], t["size"], side, "rest", rec.ts
+            )
+
     def on_frame(self, rec: RawRecord) -> None:
         msg: dict[str, Any] = orjson.loads(rec.payload)
         kind = msg.get("type")

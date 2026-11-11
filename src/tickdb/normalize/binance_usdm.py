@@ -162,6 +162,13 @@ class BinanceUsdmNormalizer(VenueNormalizer):
         self._flush(symbol, sync)
         sync.synced, sync.known, sync.last_u, sync.pending = False, False, None, None
 
+    def on_backfill(self, symbol: str, rec: RawRecord) -> None:
+        for t in orjson.loads(rec.payload):
+            ts = int(t["T"]) * MS
+            self.engine.trade(
+                symbol, ts, ts, str(t["a"]), t["p"], t["q"], -1 if t["m"] else 1, "rest", rec.ts
+            )
+
     # ------------------------------------------------------------------ frames
 
     def on_frame(self, rec: RawRecord) -> None:
