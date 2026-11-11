@@ -312,3 +312,21 @@ def test_content_hash_ignores_batching_but_not_values() -> None:
     assert content_hash(changed) != whole
     shuffled = t.take(pa.array(list(reversed(range(200_000)))))
     assert content_hash(shuffled, ["a"]) == whole  # sorting first restores the order
+
+
+def test_gap_report_files(tmp_path: Path) -> None:
+    from tickdb.dq import report
+
+    raw = coinbase_day(tmp_path / "raw")
+    data = tmp_path / "data"
+    compact_day(raw, data, "coinbase", DAY, ("BTC-USD",))
+    out = tmp_path / "reports"
+    summary = report.write_day(data, DAY, out)
+    assert summary["gaps"] == 2
+    md = (out / f"{DAY}.md").read_text()
+    assert "| coinbase | BTC-USD | book_l2 | disconnect |" in md
+    assert "price" not in (out / f"{DAY}.csv").read_text().splitlines()[0]  # aggregates only
+    path = report.write_summary(out, DAY, NEXT)
+    text = path.read_text()
+    assert f"| {DAY} | 2 |" in text
+    assert f"| {NEXT} | no report |" in text

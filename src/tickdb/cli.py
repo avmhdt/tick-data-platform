@@ -561,3 +561,46 @@ def load_cmd(
         typer.echo(json.dumps({"venue": name, "date": date_, "ok": report.ok, "rows": rows}))
         ok &= report.ok
     raise typer.Exit(EXIT_OK if ok else EXIT_MISMATCH)
+
+
+dq_app = typer.Typer(help="Data-quality reports.")
+app.add_typer(dq_app, name="dq")
+
+
+@dq_app.command("report")
+def dq_report(
+    date_: DateOpt,
+    out: Annotated[Path, typer.Option(help="Report folder.")] = Path("reports/dq"),
+    dest: DestOpt = None,
+    config: ConfigOpt = None,
+) -> None:
+    """Daily gap report: reports/dq/YYYY-MM-DD.{md,csv,json} (aggregates only).
+
+    Example: tickdb dq report --date 2026-11-12
+    """
+    from datetime import date as _date
+
+    from tickdb.dq import report
+
+    _, cfg = _load(config)
+    root = dest or Path(cfg.data_root).expanduser()
+    summary = report.write_day(root, _date.fromisoformat(date_), out)
+    typer.echo(json.dumps(summary))
+
+
+@dq_app.command("summary")
+def dq_summary(
+    from_: FromOpt,
+    to: Annotated[str, typer.Option("--to", help="Last UTC date (inclusive).")],
+    out: Annotated[Path, typer.Option(help="Report folder.")] = Path("reports/dq"),
+) -> None:
+    """Rolling summary reports/dq/summary.md from the daily reports.
+
+    Example: tickdb dq summary --from 2026-11-12 --to 2026-12-11
+    """
+    from datetime import date as _date
+
+    from tickdb.dq import report
+
+    path = report.write_summary(out, _date.fromisoformat(from_), _date.fromisoformat(to))
+    typer.echo(str(path))
