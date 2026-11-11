@@ -20,7 +20,7 @@ def test_repo_config_loads_with_defaults() -> None:
     assert cfg.clickhouse.port == 8123
     assert cfg.clickhouse.book_l2_ttl_days == 14
     assert cfg.retention.raw_spool_days == 7
-    assert cfg.venues["kraken"].book.depth == 100
+    assert cfg.venues["kraken"].book.depth == 1000
     assert cfg.venues["binance-usdm"].ws_routes["trades"] == "/market/stream"
     assert all(len(v.symbols) == 3 for v in cfg.venues.values())
 
