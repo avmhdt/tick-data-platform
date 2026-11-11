@@ -297,7 +297,7 @@ def test_content_hash_ignores_batching_but_not_values() -> None:
         h.update(batch)
     assert h.hexdigest() == whole
     assert h.rows == 200_000
-    changed = t.set_column(0, "a", pa.array([1] + list(range(1, 200_000)), pa.int64()))
+    changed = t.set_column(0, "a", pa.array([1, *range(1, 200_000)], pa.int64()))
     assert content_hash(changed) != whole
     shuffled = t.take(pa.array(list(reversed(range(200_000)))))
     assert content_hash(shuffled, ["a"]) == whole  # sorting first restores the order
