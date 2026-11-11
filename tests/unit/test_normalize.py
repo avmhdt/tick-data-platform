@@ -64,7 +64,12 @@ def binance_day(root: Path) -> Path:
     raw.control(5.5, {"k": "snapshot", "symbol": "BTCUSDT"}, snap2)
     raw.frame(6.0, "public.g1", _depth("BTCUSDT", 124, 125, 123, t0 + 6000))
     # sequence-aligned checkpoints once the book is known: untouched level 98.0 must match
-    good = {"lastUpdateId": 125, "T": t0 + 6500, "bids": [["100.0", "1.0"], ["98.0", "1.0"]], "asks": [["101.0", "2.0"]]}
+    good = {
+        "lastUpdateId": 125,
+        "T": t0 + 6500,
+        "bids": [["100.0", "1.0"], ["98.0", "1.0"]],
+        "asks": [["101.0", "2.0"]],
+    }
     bad = {**good, "bids": [["98.0", "7.0"]]}
     raw.control(6.5, {"k": "checkpoint", "symbol": "BTCUSDT", "checkpoint": "rest_l2"}, good)
     raw.control(6.6, {"k": "checkpoint", "symbol": "BTCUSDT", "checkpoint": "rest_l2"}, bad)
