@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -523,6 +524,9 @@ def replay_cmd(
             _raw_root(root, raw), root, name, day, tuple(vcfg.symbols),
             keep_scratch=keep_scratch, kraken_depth=vcfg.book.depth or 1000,
         )  # fmt: skip
+        from tickdb.retention import record_verify
+
+        record_verify(root, name, day, report)
         typer.echo(json.dumps(report))
         ok &= report["ok"]
     raise typer.Exit(EXIT_OK if ok or not verify else EXIT_MISMATCH)
@@ -649,3 +653,137 @@ async def _backfill(
         received += await filler.fetch(need)
     await filler.http.aclose()
     return received, filler.requests, str(filler.write(root, day))
+
+
+retention_app = typer.Typer(help="Retention (raw kept 7 days after verification, D-10).")
+scheduler_app = typer.Typer(help="Daily job.")
+app.add_typer(retention_app, name="retention")
+app.add_typer(scheduler_app, name="scheduler")
+
+
+@retention_app.command("apply")
+def retention_apply(
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="List only.")] = False,
+    dest: DestOpt = None,
+    config: ConfigOpt = None,
+) -> None:
+    """Delete raw venue-days past retention whose replay check passed (never others).
+
+    Example: tickdb retention apply --dry-run
+    """
+    from tickdb import retention
+
+    _, cfg = _load(config)
+    root = dest or Path(cfg.data_root).expanduser()
+    plan = retention.apply(root, cfg.retention.raw_spool_days, dry_run=dry_run)
+    report = {
+        "dry_run": dry_run,
+        "delete": [str(p.relative_to(root)) for p in plan.delete],
+        "bytes": plan.bytes,
+        "kept_unverified": plan.keep_unverified,
+    }
+    typer.echo(json.dumps(report))
+
+
+@scheduler_app.command("run")
+def scheduler_run(
+    once: Annotated[str, typer.Option(help="Job to run once: daily.")] = "daily",
+    date_: Annotated[str | None, typer.Option("--date", help="Day; default yesterday UTC.")] = None,
+    reports: Annotated[Path, typer.Option(help="Gap report folder.")] = Path("reports/dq"),
+    config: ConfigOpt = None,
+) -> None:
+    """Run the daily job for D-1 (compact, backfill, load, replay, report, retention).
+
+    Example: tickdb scheduler run --once daily
+    """
+    from datetime import date as _date
+    from datetime import timedelta
+
+    from tickdb import retention, scheduler
+    from tickdb.compact.compactor import compact_day, replay_verify
+    from tickdb.dq import report
+    from tickdb.ingest import backfill as bf
+
+    if once != "daily":
+        typer.echo("only the daily job runs here; the hourly step is the mirror's cron", err=True)
+        raise typer.Exit(EXIT_CONFIG)
+    settings, cfg = _load(config)
+    root = Path(cfg.data_root).expanduser()
+    raw = root / "raw" / "external" / "lob-alpha"
+    day = _date.fromisoformat(date_) if date_ else datetime.now(UTC).date() - timedelta(days=1)
+    log = Path("results") / "job_log.csv"
+    results = {}
+    with scheduler.job_lock(root / "meta" / "scheduler" / ".lock") as locked:
+        if not locked:
+            typer.echo("another daily job holds the lock")
+            raise typer.Exit(EXIT_OK)
+        for name in cfg.enabled_venues():
+            vcfg = cfg.venues[name]
+            symbols = tuple(vcfg.symbols)
+            depth = vcfg.book.depth or 1000
+            fetched = {"rows": 0}
+
+            def compact(
+                name: str = name, symbols: tuple[str, ...] = symbols, depth: int = depth
+            ) -> scheduler.StepResult:
+                r = compact_day(raw, root, name, day, symbols, kraken_depth=depth)
+                return scheduler.StepResult(
+                    "compact", bool(r.partitions), f"{r.seconds}s gaps={r.gaps}"
+                )
+
+            def backfill(
+                name: str = name, fetched: dict[str, int] = fetched
+            ) -> scheduler.StepResult:
+                needs = bf.plan(root, name, day)
+                if not needs:
+                    return scheduler.StepResult("backfill", True, "no open trade gaps")
+                got, requests, _ = asyncio.run(_backfill(bf, name, cfg, needs, root, day))
+                fetched["rows"] = got
+                return scheduler.StepResult("backfill", True, f"received={got} requests={requests}")
+
+            def recompact(
+                name: str = name,
+                symbols: tuple[str, ...] = symbols,
+                depth: int = depth,
+                fetched: dict[str, int] = fetched,
+            ) -> scheduler.StepResult:
+                if not fetched["rows"]:
+                    return scheduler.StepResult("recompact", True, "nothing fetched", skipped=True)
+                r = compact_day(raw, root, name, day, symbols, kraken_depth=depth)
+                return scheduler.StepResult("recompact", True, f"{r.seconds}s gaps={r.gaps}")
+
+            def load(name: str = name, symbols: tuple[str, ...] = symbols) -> scheduler.StepResult:
+                if settings.clickhouse_password is None:
+                    return scheduler.StepResult(
+                        "load", False, "ClickHouse not configured", skipped=True
+                    )
+                from tickdb.load import clickhouse as ch
+
+                client = ch.connect_settings(settings)
+                ch.apply_schema(client)
+                rep = ch.load_venue_day(client, root, name, day, symbols)
+                return scheduler.StepResult(
+                    "load", rep.ok, json.dumps({t: v["rows"] for t, v in rep.tables.items()})
+                )
+
+            def replay(
+                name: str = name, symbols: tuple[str, ...] = symbols, depth: int = depth
+            ) -> scheduler.StepResult:
+                rep = replay_verify(raw, root, name, day, symbols, kraken_depth=depth)
+                retention.record_verify(root, name, day, rep)
+                return scheduler.StepResult(
+                    "replay", bool(rep["ok"]), f"partitions={len(rep['partitions'])}"
+                )
+
+            actions: dict[str, Callable[..., scheduler.StepResult]] = {
+                "compact": compact,
+                "backfill": backfill,
+                "recompact": recompact,
+                "load": load,
+                "replay": replay,
+            }
+            results[name] = scheduler.daily_steps(name, day, actions, log)
+        report.write_day(root, day, reports)
+        report.write_summary(reports, _date(2026, 11, 12), day)
+        retention.apply(root, cfg.retention.raw_spool_days, dry_run=False)
+    typer.echo(scheduler.status_line(results))
