@@ -65,9 +65,10 @@ class PushBookNormalizer(VenueNormalizer):
         self.live.discard(symbol)
         self.known.discard(symbol)
 
-    def distrust(self, symbol: str, kind: str, ts: int) -> None:
-        """The stream keeps flowing but the book is wrong (checksum): archive, don't trust."""
-        self.engine.open_gap(symbol, "book_l2", kind, ts)
+    def distrust(self, symbol: str, kind: str, ts: int, last_good: int | None) -> None:
+        """The stream keeps flowing but the book is wrong (checksum): archive, don't trust.
+        The gap starts at the last message that checked out, so the bad batch is inside it."""
+        self.engine.open_gap(symbol, "book_l2", kind, ts, start=last_good)
         self.known.discard(symbol)
 
     def on_connected(self, logical: str, ts: int) -> None:

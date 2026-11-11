@@ -254,6 +254,17 @@ def test_kraken_state_start_checksum_and_resubscribe(tmp_path: Path) -> None:
     assert trades[0]["price"] == 100.5
     # partition directories percent-encode the '/'
     assert (data / "book_l2" / "venue=kraken" / "symbol=BTC%2FUSD").is_dir()
+    bbo = table(data, "bbo", "kraken", "BTC/USD").to_pylist()
+    assert bbo[0]["in_resync"] is False  # the day starts from the state book
+    assert (bbo[0]["bid_px"], bbo[0]["ask_px"]) == (100.0, 101.0)
+    flags = [r["in_resync"] for r in bbo]
+    assert True in flags  # the checksum gap flags rows until the resubscribe snapshot
+    assert flags[-1] is False
+    assert result.counters["bbo_crossed/BTC/USD"] == 0
+    bars = pq.read_table(
+        partition_dir(data, "bars", "kraken", "BTC/USD", DAY) / "interval=1m"
+    ).to_pylist()
+    assert [(b["n_trades"], b["sell_volume"]) for b in bars] == [(1, 0.25)]
 
 
 # ------------------------------------------------------------------ idempotency, hashes

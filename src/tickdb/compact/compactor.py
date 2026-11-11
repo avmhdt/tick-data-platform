@@ -25,10 +25,13 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from tickdb import __version__, schemas
+from tickdb.compact.bars import INTERVALS, compute_bars, read_trades
+from tickdb.compact.bbo import BboStats, derive_bbo
 from tickdb.compact.hashing import StreamHasher
 from tickdb.normalize import NORMALIZERS
 from tickdb.normalize.engine import Engine
 from tickdb.normalize.rawlog import day_records
+from tickdb.timeutil import day_bounds
 
 ROW_GROUP = 1_000_000
 FILE_ROWS = 40_000_000  # about 512 MB at the measured bytes/row of book_l2
@@ -163,6 +166,7 @@ def normalize_to(
             "content_hash": part.hasher.hexdigest(),
             "tickdb_version": __version__,
             "spool_files": result.raw_files,
+            "_rel": str(partition_dir(Path(), dataset, venue, symbol, day)),
         }
     gaps = pa.Table.from_pylist([g.row() for g in engine.gaps], schema=schemas.GAPS)
     gap_dir = out_root / "meta" / "gaps" / f"venue={venue}" / f"date={day.isoformat()}"
@@ -171,6 +175,97 @@ def normalize_to(
     result.gaps = gaps.num_rows
     result.seconds = round(time.monotonic() - started, 1)
     return result
+
+
+def _write(out_dir: Path, dataset: str, symbol: str, batches: Any) -> _Part:
+    part = _Part(dataset, symbol, out_dir, StreamHasher(schemas.SCHEMAS[dataset]))
+    for batch in batches:
+        part.write(batch, schemas.SCHEMAS[dataset])
+    part.close()
+    if part.writer is None:  # no rows: still write an empty file so the partition exists
+        out_dir.mkdir(parents=True, exist_ok=True)
+        pq.write_table(schemas.SCHEMAS[dataset].empty_table(), out_dir / "part-0000.parquet")
+    return part
+
+
+def _book_gap_starts(root: Path, venue: str, day: date, symbol: str) -> list[int]:
+    path = root / "meta" / "gaps" / f"venue={venue}" / f"date={day.isoformat()}"
+    if not path.exists():
+        return []
+    rows = pq.read_table(path, columns=["symbol", "channel", "start_recv"]).to_pylist()
+    return sorted(
+        r["start_recv"] for r in rows if r["symbol"] == symbol and r["channel"] == "book_l2"
+    )
+
+
+def derive_bbo_into(
+    root: Path, venue: str, day: date, symbols: tuple[str, ...], result: CompactResult
+) -> None:
+    """BBO for each symbol from ``root``'s book_l2 and gaps (FR-08)."""
+    for symbol in symbols:
+        book = partition_dir(root, "book_l2", venue, symbol, day)
+        if not book.exists():
+            continue
+        stats = BboStats()
+        rel = partition_dir(Path(), "bbo", venue, symbol, day)
+        gaps = _book_gap_starts(root, venue, day, symbol)
+        part = _write(root / rel, "bbo", symbol, derive_bbo(book, venue, symbol, gaps, stats))
+        result.counters[f"bbo_crossed/{symbol}"] = stats.crossed
+        result.counters[f"bbo_resync_rows/{symbol}"] = stats.resync_rows
+        result.partitions[f"bbo/{symbol}"] = _manifest(part, "bbo", venue, symbol, day, rel)
+
+
+def derive_bars_into(
+    out_root: Path,
+    trades_roots: tuple[Path, Path],
+    venue: str,
+    day: date,
+    symbols: tuple[str, ...],
+    result: CompactResult,
+) -> None:
+    """1 s and 1 m bars of ``day`` from trades of ``day`` (first root) and ``day + 1``."""
+    start, end = day_bounds(day)
+    for symbol in symbols:
+        trades = read_trades(
+            [
+                partition_dir(trades_roots[0], "trades", venue, symbol, day),
+                partition_dir(trades_roots[1], "trades", venue, symbol, day + timedelta(days=1)),
+            ]
+        )
+        for interval in INTERVALS:
+            rel = partition_dir(Path(), "bars", venue, symbol, day) / f"interval={interval}"
+            table = compute_bars(trades, interval, start, end)
+            part = _write(out_root / rel, "bars", symbol, table.to_batches())
+            key = f"bars/{symbol}/{interval}"
+            result.partitions[key] = _manifest(part, "bars", venue, symbol, day, rel)
+
+
+def _manifest(
+    part: _Part, dataset: str, venue: str, symbol: str, day: date, rel: Path
+) -> dict[str, Any]:
+    return {
+        "dataset": dataset,
+        "venue": venue,
+        "symbol": symbol,
+        "date": day.isoformat(),
+        "rows": part.rows,
+        "content_hash": part.hasher.hexdigest(),
+        "tickdb_version": __version__,
+        "spool_files": [],
+        "_rel": str(rel),
+    }
+
+
+def _publish(staging: Path, data_root: Path, partitions: dict[str, dict[str, Any]]) -> str:
+    created = datetime.now(UTC).isoformat(timespec="seconds")
+    for manifest in partitions.values():
+        rel = Path(manifest["_rel"])
+        body = {k: v for k, v in manifest.items() if k != "_rel"} | {"created_utc": created}
+        (staging / rel / "_manifest.json").write_bytes(
+            orjson.dumps(body, option=orjson.OPT_INDENT_2)
+        )
+        _swap(staging / rel, data_root / rel)
+    return created
 
 
 def _swap(staging: Path, final: Path) -> None:
@@ -198,13 +293,9 @@ def compact_day(
     result = normalize_to(
         raw_root, staging, venue, day, symbols, kraken_depth=kraken_depth, carry_root=data_root
     )
-    created = datetime.now(UTC).isoformat(timespec="seconds")
-    for manifest in result.partitions.values():
-        src = partition_dir(staging, manifest["dataset"], venue, manifest["symbol"], day)
-        (src / "_manifest.json").write_bytes(
-            orjson.dumps({**manifest, "created_utc": created}, option=orjson.OPT_INDENT_2)
-        )
-        _swap(src, partition_dir(data_root, manifest["dataset"], venue, manifest["symbol"], day))
+    derive_bbo_into(staging, venue, day, symbols, result)
+    derive_bars_into(staging, (staging, data_root), venue, day, symbols, result)
+    created = _publish(staging, data_root, result.partitions)
     for meta in ("gaps", "book_end"):
         sub = Path("meta") / meta / f"venue={venue}" / f"date={day.isoformat()}"
         _swap(staging / sub, data_root / sub)
@@ -228,6 +319,14 @@ def compact_day(
         )
     )
     shutil.rmtree(staging, ignore_errors=True)
+    previous = day - timedelta(days=1)
+    if any(partition_dir(data_root, "trades", venue, s, previous).exists() for s in symbols):
+        # bars of the previous day are final now that this day's trades exist
+        prev = CompactResult(venue, previous)
+        prev_staging = data_root / "interim" / "staging" / f"{run}-bars"
+        derive_bars_into(prev_staging, (data_root, data_root), venue, previous, symbols, prev)
+        _publish(prev_staging, data_root, prev.partitions)
+        shutil.rmtree(prev_staging, ignore_errors=True)
     return result
 
 
@@ -246,10 +345,11 @@ def replay_verify(
     result = normalize_to(
         raw_root, scratch, venue, day, symbols, kraken_depth=kraken_depth, carry_root=data_root
     )
+    derive_bbo_into(scratch, venue, day, symbols, result)
+    derive_bars_into(scratch, (scratch, data_root), venue, day, symbols, result)
     compared = {}
     for key, manifest in result.partitions.items():
-        path = partition_dir(data_root, manifest["dataset"], venue, manifest["symbol"], day)
-        stored = path / "_manifest.json"
+        stored = data_root / manifest["_rel"] / "_manifest.json"
         archived = orjson.loads(stored.read_bytes())["content_hash"] if stored.exists() else None
         compared[key] = {
             "rows": manifest["rows"],

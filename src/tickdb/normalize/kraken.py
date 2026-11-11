@@ -68,6 +68,7 @@ class KrakenNormalizer(PushBookNormalizer):
             ts_exchange = iso_to_ns(row["timestamp"]) if "timestamp" in row else rec.ts
             bids, asks = _levels(row.get("bids", [])), _levels(row.get("asks", []))
             book = self.books[symbol]
+            last_good = self.engine.last_good.get((symbol, "book_l2"))
             if kind == "snapshot":
                 self.snapshot(symbol, ts_exchange, rec.ts, rec.conn, bids, asks)
             else:
@@ -84,4 +85,4 @@ class KrakenNormalizer(PushBookNormalizer):
                 self.engine.counters["checksum_ok"] += 1
             else:
                 self.engine.counters["checksum_fail"] += 1
-                self.distrust(symbol, "checksum", rec.ts)
+                self.distrust(symbol, "checksum", rec.ts, last_good)

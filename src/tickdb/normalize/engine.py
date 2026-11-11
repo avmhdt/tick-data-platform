@@ -200,11 +200,13 @@ class Engine:
         recovery: str = "none",
         seq_from: int | None = None,
         seq_to: int | None = None,
+        start: int | None = None,
     ) -> None:
         """Open a gap starting at the stream's last good receive time (never hidden)."""
         if (symbol, channel) in self._open:
             return
-        start = self.last_good.get((symbol, channel), self.start_ns)
+        if start is None:
+            start = self.last_good.get((symbol, channel), self.start_ns)
         self._open[(symbol, channel)] = Gap(
             self.venue, symbol, channel, kind, min(start, ts_recv), None, seq_from, seq_to, recovery
         )
