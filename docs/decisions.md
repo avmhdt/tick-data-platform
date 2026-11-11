@@ -178,3 +178,52 @@ the build. `DECISIONS.md` overrides the spec, and the spec overrides `README.md`
     mirror runs no worse than otherwise (`scripts/recorder_impact.py`).
 14. **Capture Day 1 is 2026-11-12** (owner ruling of 2026-11-11, after the host crash; the
     first window, 2026-11-08 to 12-07, failed). The 30-day window is 2026-11-12 to 2026-12-11.
+
+### M3 (2026-11-11)
+
+1. **Normalizers read the shared capture's raw format directly** (`tickdb.normalize.rawlog`):
+   `ts\tpayload` frames per connection and `ts\t!<json>\t<body>` control records, merged per
+   hour by `(ts_recv, connection, line)`. Connection events (`conn_open` with `standby`,
+   `promote`, `conn_close`), REST bodies (`snapshot`, `checkpoint`) and the hourly `state`
+   record drive the replay, so the day's archive is a pure function of its raw files.
+2. **Binance snapshot bridging is stamped at the time the book became known.** The diff that
+   straddles a snapshot's `lastUpdateId` can arrive before or after it. Diffs that end before
+   the snapshot keep their own receive times; the snapshot batch and the diffs from the
+   straddling one on are stamped with the moment both were in hand. The archive stays in
+   receive-time order and replays to the correct book; original receive times stay in raw.
+3. **Days start from the recorder's state or the previous day's book.** Kraken's `state`
+   record carries levels (written as a snapshot batch with `conn_id = "state"`). Coinbase's
+   and Binance's don't, so each compaction saves the end-of-day book (`meta/book_end/`) and the
+   next day starts from it (`conn_id = "carry"`) when the same connection (Coinbase) or the
+   same `u` chain (Binance) continued across midnight. Otherwise the book is unknown until a
+   websocket snapshot or, for Binance, the day's first REST checkpoint.
+4. **Updates of an in-sync stream are always archived**, even while this replay doesn't know
+   the book's levels; derived BBO is flagged `in_resync` until it does. Nothing the venue sent
+   on the active connection is dropped.
+5. **Book gaps end only with a snapshot** and are then `partial` (book restored, L2 history
+   lost on free sources). A Kraken checksum mismatch keeps archiving the stream, opens a
+   `checksum` gap from the last message that checked out and waits for the resubscribe
+   snapshot.
+6. **Trade ids are contiguous on all three venues** (DQ-06, checked on 2026-11-08: no holes
+   outside disconnects). Trade gaps get their missing id range and are classified after REST
+   backfill: `recovered`, `partial`, `unrecoverable`, or `open` until a backfill is tried.
+   Trades are sorted into archive order at the end of the day, since REST rows carry
+   `ts_recv = ts_exchange` (DQ-07).
+7. **Content hash (FR-10):** SHA-256 of the Arrow IPC stream of the partition in archive
+   order, re-chunked into 65,536-row batches with the dataset's schema, so it doesn't depend
+   on how rows were batched.
+8. **ClickHouse tables are partitioned by `(date, venue)`**, the unit of compaction, so
+   `REPLACE PARTITION` swaps one venue-day without touching the others. The post-load check
+   compares row count and the wrap-around sum of the time column (exact integers) per symbol.
+9. **Checkpoint comparisons (DQ-04):** Binance is compared once the stream reaches
+   `lastUpdateId`, excluding levels touched by the straddling diff and by later diffs already
+   applied (a replay cannot rewind the book); Coinbase at the response time, top 20 levels,
+   excluding levels updated within ±500 ms.
+10. **Bars of day D read trades of D and D+1** (trades are partitioned by receive time, bars by
+    their `ts`), so bars of D are final once D+1 is compacted; the daily job recomputes them.
+11. **The hourly job is the mirror's cron entry.** Intraday interim parts and same-day
+    ClickHouse inserts are left to M4, where the client needs them.
+12. **Retention** deletes a raw venue-day only past 7 days and with a passing replay record in
+    `meta/verify/`; it leaves a tombstone so the mirror never copies the day again.
+13. **The daily job runs under cron in WSL** until Docker's WSL integration is back (then the
+    compose `scheduler` service). The cron line is in `docs/operations.md`; the owner adds it.

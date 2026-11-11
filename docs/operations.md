@@ -98,6 +98,19 @@ The 5x run on 2026-11-10 (WSL, reference PC, `nice 10`) is in
 | kraken (depth 1000) | 7,795 | 7,803 | 156,065 = 156,065 | 1.16 ms | 100 % |
 | coinbase (5,000-level book) | 1,770 | 1,774 | 35,488 = 35,488 | 1.15 ms | 99.992 % |
 
+## Daily job (M3)
+
+`tickdb scheduler run --once daily` compacts yesterday (UTC) per venue, runs REST backfill of
+trade gaps, re-compacts if REST rows arrived, loads ClickHouse (skipped while it isn't
+configured), checks the replay hash, writes `reports/dq/`, and applies retention. It runs from
+the repo so the gap reports land in `reports/dq/`. Proposed cron line for the owner (WSL
+crontab, after 01:30 UTC so the first hour of the next day is closed and mirrored):
+
+```cron
+# tdp-daily: tick-data-platform daily job (compaction, backfill, replay, gap reports, retention)
+40 1 * * * cd /mnt/d/trading-strategy-brainstorm/tick-data-platform && UV_PROJECT_ENVIRONMENT=/home/ze/.cache/tickdb/venv nice -n 10 ionice -c3 /home/ze/.local/bin/uv run --no-sync tickdb scheduler run --once daily >> /home/ze/data/tick-data-platform/meta/scheduler.log 2>&1 # tdp-daily
+```
+
 ## Incidents and owner steps
 
 | Date (UTC) | Event |
