@@ -60,11 +60,16 @@ src = ["src", "tests"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP", "SIM", "PT", "RUF", "ASYNC"]
 
+[tool.ruff.lint.per-file-ignores]
+# Tests start mock-venue subprocesses and write reports from async tests on purpose.
+"tests/**" = ["ASYNC220", "ASYNC230", "ASYNC240", "E501"]  # fixture literals
+
 [tool.mypy]
 python_version = "3.12"
 strict = true
 files = ["src"]
 plugins = ["pydantic.mypy"]
+platform = "linux"
 
 [[tool.mypy.overrides]]
 module = ["pyarrow", "pyarrow.*", "ntplib", "clickhouse_connect", "clickhouse_connect.*"]
