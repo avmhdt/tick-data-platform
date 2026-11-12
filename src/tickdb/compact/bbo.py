@@ -2,9 +2,11 @@
 
 A row is emitted only when one of bid_px, bid_qty, ask_px, ask_qty (or the resync flag)
 changes, after a whole batch is applied (book state is defined only between batches). A
-snapshot batch replaces the book. ``in_resync`` is true while the book's levels are not
-known: before the day's first snapshot batch, and from the start of a book_l2 gap until the
-next snapshot batch. Crossed rows (bid >= ask) outside resync are counted for DQ-05.
+snapshot batch replaces the book. For a venue with a subscribed depth (Kraken: 1000) the book is
+truncated to that depth after every batch, as the venue's own book is (D-06).
+``in_resync`` is true while the book's levels are not known: before the day's first
+snapshot batch, and from the start of a book_l2 gap until the next snapshot batch. Crossed
+rows (bid >= ask) outside resync are counted for DQ-05.
 """
 
 from __future__ import annotations
@@ -42,6 +44,17 @@ class _Side:
         self.qty.clear()
         self.keys.clear()
 
+    def truncate(self, depth: int, best_high: bool) -> None:
+        """Keep the best ``depth`` levels (venues like Kraken send no delete for levels that
+        leave the subscribed scope, so the replay must drop them as the venue does)."""
+        extra = len(self.keys) - depth
+        if extra <= 0:
+            return
+        dropped = self.keys[:extra] if best_high else self.keys[depth:]
+        for price in dropped:
+            del self.qty[price]
+        self.keys = self.keys[extra:] if best_high else self.keys[:depth]
+
 
 @dataclass
 class BboStats:
@@ -64,6 +77,7 @@ def derive_bbo(
     gap_starts: list[int],
     stats: BboStats | None = None,
     chunk: int = 500_000,
+    depth: int | None = None,
 ) -> Iterator[pa.RecordBatch]:
     """Yield BBO record batches for one book_l2 partition. ``gap_starts``: book gap start
     times (``start_recv``) of this symbol, ascending."""
@@ -79,6 +93,9 @@ def derive_bbo(
 
     def close_batch() -> None:
         nonlocal last
+        if depth is not None:
+            bids.truncate(depth, best_high=True)
+            asks.truncate(depth, best_high=False)
         bid_px = bids.keys[-1] if bids.keys else None
         ask_px = asks.keys[0] if asks.keys else None
         top = (

@@ -201,7 +201,12 @@ def _book_gap_starts(root: Path, venue: str, day: date, symbol: str) -> list[int
 
 
 def derive_bbo_into(
-    root: Path, venue: str, day: date, symbols: tuple[str, ...], result: CompactResult
+    root: Path,
+    venue: str,
+    day: date,
+    symbols: tuple[str, ...],
+    result: CompactResult,
+    depth: int | None = None,
 ) -> None:
     """BBO for each symbol from ``root``'s book_l2 and gaps (FR-08)."""
     for symbol in symbols:
@@ -211,7 +216,8 @@ def derive_bbo_into(
         stats = BboStats()
         rel = partition_dir(Path(), "bbo", venue, symbol, day)
         gaps = _book_gap_starts(root, venue, day, symbol)
-        part = _write(root / rel, "bbo", symbol, derive_bbo(book, venue, symbol, gaps, stats))
+        batches = derive_bbo(book, venue, symbol, gaps, stats, depth=depth)
+        part = _write(root / rel, "bbo", symbol, batches)
         result.counters[f"bbo_crossed/{symbol}"] = stats.crossed
         result.counters[f"bbo_resync_rows/{symbol}"] = stats.resync_rows
         result.partitions[f"bbo/{symbol}"] = _manifest(part, "bbo", venue, symbol, day, rel)
@@ -270,6 +276,11 @@ def _publish(staging: Path, data_root: Path, partitions: dict[str, dict[str, Any
     return created
 
 
+def _depth(venue: str, kraken_depth: int) -> int | None:
+    """Subscribed book depth whose out-of-scope levels the venue never deletes."""
+    return kraken_depth if venue == "kraken" else None
+
+
 def _swap(staging: Path, final: Path) -> None:
     final.parent.mkdir(parents=True, exist_ok=True)
     old = final.with_name(final.name + f".old-{uuid.uuid4().hex[:8]}")
@@ -302,7 +313,7 @@ def compact_day(
         carry_root=data_root,
         backfill_root=data_root / "raw" / "backfill",
     )
-    derive_bbo_into(staging, venue, day, symbols, result)
+    derive_bbo_into(staging, venue, day, symbols, result, depth=_depth(venue, kraken_depth))
     derive_bars_into(staging, (staging, data_root), venue, day, symbols, result)
     created = _publish(staging, data_root, result.partitions)
     for meta in ("gaps", "book_end"):
@@ -361,7 +372,7 @@ def replay_verify(
         carry_root=data_root,
         backfill_root=data_root / "raw" / "backfill",
     )
-    derive_bbo_into(scratch, venue, day, symbols, result)
+    derive_bbo_into(scratch, venue, day, symbols, result, depth=_depth(venue, kraken_depth))
     derive_bars_into(scratch, (scratch, data_root), venue, day, symbols, result)
     compared = {}
     for key, manifest in result.partitions.items():

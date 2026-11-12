@@ -456,3 +456,48 @@ def test_venue_published_cross_is_a_documented_exception(tmp_path: Path) -> None
     assert checks["crossed_bbo_venue_confirmed"] == 1
     assert checks["verdicts"]["crossed_bbo"] == "pass"
     assert "documented exception" in checks["exceptions"][0]
+
+
+def test_bbo_drops_levels_that_leave_the_subscribed_depth(tmp_path: Path) -> None:
+    """Kraken sends no delete for a level that falls out of scope; a replay that keeps it can
+    show a stale level as the best price later. The BBO replay truncates like the venue."""
+    raw = RawDay(tmp_path / "raw", "kraken", DAY)
+    bids = [("100.0", "1.00000000"), ("99.0", "1.00000000")]
+    asks = [("101.0", "1.00000000"), ("102.0", "1.00000000")]
+    book = _book(bids, asks)
+    state = {
+        "books": {"BTC/USD": {"state": "LIVE", "bids": bids, "asks": asks}},
+        "active": {"ws": "ws.g1"},
+    }
+    raw.control(0.0, {"k": "state", "state": state})
+    # depth 2: a better bid pushes 99.0 out of scope (no delete is sent for it)
+    book.apply(BID, "100.5", "1.00000000")
+    book.truncate(2)
+    raw.frame(
+        1.0,
+        "ws.g1",
+        kraken_book_frame(
+            "update", "BTC/USD", [("100.5", "1.00000000")], [], book, "2026-11-09T00:00:00.9Z"
+        ),
+    )
+    # both remaining bids are removed; the venue's book has no bid left, never the stale 99.0
+    book.apply(BID, "100.5", "0")
+    book.apply(BID, "100.0", "0")
+    raw.frame(
+        2.0,
+        "ws.g1",
+        kraken_book_frame(
+            "update",
+            "BTC/USD",
+            [("100.5", "0"), ("100.0", "0")],
+            [],
+            book,
+            "2026-11-09T00:00:01.9Z",
+        ),
+    )
+    raw.write()
+    data = tmp_path / "data"
+    result = compact_day(tmp_path / "raw", data, "kraken", DAY, ("BTC/USD",), kraken_depth=2)
+    assert result.counters.get("checksum_fail", 0) == 0
+    last = table(data, "bbo", "kraken", "BTC/USD").to_pylist()[-1]
+    assert last["bid_px"] is None  # not the out-of-scope 99.0

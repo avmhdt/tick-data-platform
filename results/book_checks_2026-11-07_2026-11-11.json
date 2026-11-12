@@ -1,0 +1,90 @@
+{
+  "binance-usdm": {
+    "days": 5,
+    "checksum_ok": 0,
+    "checksum_fail": 0,
+    "ckpt_match": 1861,
+    "ckpt_mismatch": 0,
+    "ckpt_skipped": 9,
+    "crossed_bbo": 0,
+    "seq_gaps": 0,
+    "crossed_bbo_venue_confirmed": 0,
+    "exceptions": [],
+    "resyncs": 111,
+    "resync_median_s": 27.638,
+    "checksum_match_pct": null,
+    "ckpt_match_pct": 100.0,
+    "resync_source": "shared recorder (crypto-lob-alpha), last good message to snapshot",
+    "verdicts": {
+      "checkpoints": "pass",
+      "crossed_bbo": "pass",
+      "resync_median": "documented exception (owner 2026-11-12): shared recorder"
+    },
+    "seq_breaks_resynced": true,
+    "ingestor_tested_resync": {
+      "max_s": 2.945,
+      "median_s": 0.684,
+      "resyncs": 15,
+      "source": "tickdb ingestor vs mock venue (tests); not the live shared recorder"
+    }
+  },
+  "coinbase": {
+    "days": 5,
+    "checksum_ok": 0,
+    "checksum_fail": 0,
+    "ckpt_match": 1863,
+    "ckpt_mismatch": 26,
+    "ckpt_skipped": 6,
+    "crossed_bbo": 0,
+    "seq_gaps": 0,
+    "crossed_bbo_venue_confirmed": 0,
+    "exceptions": [],
+    "resyncs": 48,
+    "resync_median_s": 2.799,
+    "checksum_match_pct": null,
+    "ckpt_match_pct": 98.624,
+    "ckpt_method": "sequence-aligned via heartbeats, +-1 s (REST book ~1 s stale)",
+    "resync_source": "shared recorder (crypto-lob-alpha), last good message to snapshot",
+    "verdicts": {
+      "checkpoints": "documented miss (owner 2026-11-12)",
+      "crossed_bbo": "pass",
+      "resync_median": "pass"
+    },
+    "seq_breaks_resynced": true,
+    "ingestor_tested_resync": {
+      "max_s": 0.004,
+      "median_s": 0.003,
+      "resyncs": 13,
+      "source": "tickdb ingestor vs mock venue (tests); not the live shared recorder"
+    }
+  },
+  "kraken": {
+    "days": 5,
+    "checksum_ok": 133409173,
+    "checksum_fail": 0,
+    "ckpt_match": 0,
+    "ckpt_mismatch": 0,
+    "ckpt_skipped": 0,
+    "crossed_bbo": 2117,
+    "seq_gaps": 0,
+    "crossed_bbo_venue_confirmed": 0,
+    "exceptions": [],
+    "resyncs": 108,
+    "resync_median_s": 2.192,
+    "checksum_match_pct": 100.0,
+    "ckpt_match_pct": null,
+    "resync_source": "shared recorder (crypto-lob-alpha), last good message to snapshot",
+    "verdicts": {
+      "checksums": "pass",
+      "crossed_bbo": "miss",
+      "resync_median": "pass"
+    },
+    "seq_breaks_resynced": true,
+    "ingestor_tested_resync": {
+      "max_s": 0.004,
+      "median_s": 0.002,
+      "resyncs": 15,
+      "source": "tickdb ingestor vs mock venue (tests); not the live shared recorder"
+    }
+  }
+}
