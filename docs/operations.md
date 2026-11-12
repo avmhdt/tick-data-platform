@@ -101,15 +101,27 @@ The 5x run on 2026-11-10 (WSL, reference PC, `nice 10`) is in
 ## Daily job (M3)
 
 `tickdb scheduler run --once daily` compacts yesterday (UTC) per venue, runs REST backfill of
-trade gaps, re-compacts if REST rows arrived, loads ClickHouse (skipped while it isn't
-configured), checks the replay hash, writes `reports/dq/`, and applies retention. It runs from
-the repo so the gap reports land in `reports/dq/`. Proposed cron line for the owner (WSL
-crontab, after 01:30 UTC so the first hour of the next day is closed and mirrored):
+trade gaps (with the data.binance.vision fallback), re-compacts if rows arrived, loads
+ClickHouse (skipped while it isn't configured), checks the replay hash, writes the gap report
+and summary, and applies retention. It runs from the ext4 deploy clone
+`~/tick-data-platform-deploy` (like the mirror), never from `/mnt/d`, whose drvfs mount breaks
+on a Windows sign-out and whose branch changes during development. Logs go to
+`~/data/tick-data-platform/meta/scheduler/` (`job_log.csv` per step, `cron.log`) and reports to
+`~/data/tick-data-platform/reports/dq/`; the aggregates are copied into the repo's
+`reports/dq/` when published. Without a `.env` in the deploy clone the data root is
+`~/data/tick-data-platform` and the load step is skipped; once the ClickHouse password exists,
+copy `.env` into the deploy clone (`chmod 600`).
+
+Cron line for the owner (WSL crontab of `ze`; 01:40 UTC, after the first hour of the next day
+has closed and been mirrored):
 
 ```cron
-# tdp-daily: tick-data-platform daily job (compaction, backfill, replay, gap reports, retention)
-40 1 * * * cd /mnt/d/trading-strategy-brainstorm/tick-data-platform && UV_PROJECT_ENVIRONMENT=/home/ze/.cache/tickdb/venv nice -n 10 ionice -c3 /home/ze/.local/bin/uv run --no-sync tickdb scheduler run --once daily >> /home/ze/data/tick-data-platform/meta/scheduler.log 2>&1 # tdp-daily
+# tdp-daily: tick-data-platform daily job (compaction, backfill, replay, gap reports, retention). Runs from the ext4 deploy clone.
+40 1 * * * mkdir -p /home/ze/data/tick-data-platform/meta/scheduler && cd /home/ze/tick-data-platform-deploy && nice -n 10 ionice -c3 /home/ze/.local/bin/uv run --no-sync tickdb scheduler run --once daily >> /home/ze/data/tick-data-platform/meta/scheduler/cron.log 2>&1 # tdp-daily
 ```
+
+The deploy clone tracks the branch that holds the scheduler (`m3-archive` until M3 merges,
+then `main`); it is updated only between runs, with `git pull` and `uv sync --locked`.
 
 ## Incidents and owner steps
 
