@@ -364,6 +364,9 @@ def test_book_checks_summary(tmp_path: Path) -> None:
     assert checks["binance-usdm"]["seq_gaps"] == 1
     assert checks["binance-usdm"]["seq_gaps_resynced"] == 1
     assert checks["binance-usdm"]["resync_median_s"] is not None
+    assert checks["binance-usdm"]["verdicts"]["checkpoints"] == "miss"
+    assert checks["kraken"]["verdicts"]["crossed_bbo"] == "pass"
+    assert checks["kraken"]["crossed_bbo_venue_confirmed"] == 0
 
 
 def test_coinbase_checkpoints_aligned_by_sequence(tmp_path: Path) -> None:
@@ -413,3 +416,43 @@ def test_coinbase_checkpoints_aligned_by_sequence(tmp_path: Path) -> None:
     assert result["compared"] == 2
     assert result["match_1.0s"] == 1  # the stale one matches at its aligned time
     assert result["match_pct_1.0s"] == 50.0
+
+
+def test_venue_published_cross_is_a_documented_exception(tmp_path: Path) -> None:
+    from tickdb.dq import report
+
+    raw = RawDay(tmp_path / "raw", "kraken", DAY)
+    bids = [("100.0", "1.00000000")]
+    asks = [("101.0", "2.00000000")]
+    book = _book(bids, asks)
+    state = {
+        "books": {"BTC/USD": {"state": "LIVE", "bids": bids, "asks": asks}},
+        "active": {"ws": "ws.g1"},
+    }
+    raw.control(0.0, {"k": "state", "state": state})
+    book.apply(BID, "102.0", "0.50000000")  # the venue's book crosses: bid above the ask
+    raw.frame(
+        1.0,
+        "ws.g1",
+        kraken_book_frame(
+            "update", "BTC/USD", [("102.0", "0.50000000")], [], book, "2026-11-09T00:00:00.9Z"
+        ),
+    )
+    book.apply(BID, "102.0", "0")
+    raw.frame(
+        2.0,
+        "ws.g1",
+        kraken_book_frame(
+            "update", "BTC/USD", [("102.0", "0")], [], book, "2026-11-09T00:00:01.9Z"
+        ),
+    )
+    raw.write()
+    data = tmp_path / "data"
+    result = compact_day(tmp_path / "raw", data, "kraken", DAY, ("BTC/USD",))
+    assert result.counters.get("checksum_fail", 0) == 0
+    assert result.counters["crossed_confirmed/BTC/USD"] == 1
+    checks = report.book_checks(data, DAY, DAY)["kraken"]
+    assert checks["crossed_bbo"] == 0  # nothing crossed by our own processing
+    assert checks["crossed_bbo_venue_confirmed"] == 1
+    assert checks["verdicts"]["crossed_bbo"] == "pass"
+    assert "documented exception" in checks["exceptions"][0]

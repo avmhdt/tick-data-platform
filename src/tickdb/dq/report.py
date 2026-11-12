@@ -115,7 +115,8 @@ def book_checks(data_root: Path, first: date, last: date) -> dict[str, dict[str,
             rec = orjson.loads(path.read_bytes())
             c = rec.get("counters", {})
             zero = dict.fromkeys(COUNTED, 0) | {"crossed_bbo": 0, "seq_gaps": 0}
-            v = out.setdefault(venue, {"days": 0, **zero, "resync_seconds": []})
+            zero |= {"crossed_bbo_venue_confirmed": 0}
+            v = out.setdefault(venue, {"days": 0, **zero, "resync_seconds": [], "exceptions": []})
             v["days"] += 1
             for key in (
                 "checksum_ok",
@@ -125,7 +126,20 @@ def book_checks(data_root: Path, first: date, last: date) -> dict[str, dict[str,
                 "ckpt_skipped",
             ):
                 v[key] += int(c.get(key, 0))
-            v["crossed_bbo"] += sum(int(n) for k, n in c.items() if k.startswith("bbo_crossed/"))
+            for key, n in c.items():
+                if not key.startswith("bbo_crossed/") or not n:
+                    continue
+                symbol = key.removeprefix("bbo_crossed/")
+                confirmed = c.get(f"crossed_confirmed/{symbol}", 0)
+                unverified = c.get(f"crossed_unverified/{symbol}", 0)
+                if confirmed and not unverified:  # every crossed book passed the venue checksum
+                    v["crossed_bbo_venue_confirmed"] += int(n)
+                    v["exceptions"].append(
+                        f"{day} {symbol}: {n} crossed BBO rows published by the venue "
+                        "(checksum-confirmed); documented exception, owner 2026-11-12"
+                    )
+                else:
+                    v["crossed_bbo"] += int(n)
         for gap in load_gaps(data_root, day):
             if gap["channel"] != "book_l2" or gap["venue"] not in out:
                 continue
@@ -146,7 +160,42 @@ def book_checks(data_root: Path, first: date, last: date) -> dict[str, dict[str,
         v["checksum_match_pct"] = round(100 * v["checksum_ok"] / total, 4) if total else None
         compared = v["ckpt_match"] + v["ckpt_mismatch"]
         v["ckpt_match_pct"] = round(100 * v["ckpt_match"] / compared, 3) if compared else None
+    _label(out, data_root)
+    tested = Path("results") / "ingestor_resync.json"
+    if tested.exists():  # this project's ingestor against mock venues, labelled as such
+        for venue, figures in orjson.loads(tested.read_bytes()).items():
+            if venue in out:
+                out[venue]["ingestor_tested_resync"] = figures
     return out
+
+
+THRESHOLDS = {"checksum_match_pct": 100.0, "ckpt_binance": 100.0, "ckpt_coinbase": 99.0,
+              "resync_median_s": 10.0}  # fmt: skip
+
+
+def _label(out: dict[str, dict[str, Any]], data_root: Path) -> None:
+    """Pass/miss per AC-W-05 item, with the owner's rulings of 2026-11-12 (thresholds kept)."""
+    for venue, v in out.items():
+        verdicts: dict[str, str] = {}
+        if v["checksum_match_pct"] is not None:
+            verdicts["checksums"] = "pass" if v["checksum_match_pct"] >= 100.0 else "miss"
+        if v["ckpt_match_pct"] is not None:
+            need = THRESHOLDS["ckpt_coinbase" if venue == "coinbase" else "ckpt_binance"]
+            ok = v["ckpt_match_pct"] >= need
+            verdicts["checkpoints"] = "pass" if ok else "miss"
+            if venue == "coinbase":
+                v["ckpt_method"] = "sequence-aligned via heartbeats, +-1 s (REST book ~1 s stale)"
+                if not ok:
+                    verdicts["checkpoints"] = "documented miss (owner 2026-11-12)"
+        verdicts["crossed_bbo"] = "pass" if v["crossed_bbo"] == 0 else "miss"
+        if v["resync_median_s"] is not None:
+            ok = v["resync_median_s"] <= THRESHOLDS["resync_median_s"]
+            v["resync_source"] = "shared recorder (crypto-lob-alpha), last good message to snapshot"
+            verdicts["resync_median"] = (
+                "pass" if ok else ("documented exception (owner 2026-11-12): shared recorder")
+            )
+        v["verdicts"] = verdicts
+        v["seq_breaks_resynced"] = v.get("seq_gaps_resynced", 0) == v["seq_gaps"]
 
 
 def _coinbase_checkpoints(

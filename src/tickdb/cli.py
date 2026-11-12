@@ -696,10 +696,15 @@ def retention_apply(
 def scheduler_run(
     once: Annotated[str, typer.Option(help="Job to run once: daily.")] = "daily",
     date_: Annotated[str | None, typer.Option("--date", help="Day; default yesterday UTC.")] = None,
-    reports: Annotated[Path, typer.Option(help="Gap report folder.")] = Path("reports/dq"),
+    reports: Annotated[
+        Path | None, typer.Option(help="Gap report folder; default <data root>/reports/dq.")
+    ] = None,
     config: ConfigOpt = None,
 ) -> None:
     """Run the daily job for D-1 (compact, backfill, load, replay, report, retention).
+
+    Runs from the ext4 deploy clone; logs and reports go under the data root, and the
+    aggregates are copied into the repo's reports/dq/ for publishing.
 
     Example: tickdb scheduler run --once daily
     """
@@ -718,7 +723,8 @@ def scheduler_run(
     root = Path(cfg.data_root).expanduser()
     raw = root / "raw" / "external" / "lob-alpha"
     day = _date.fromisoformat(date_) if date_ else datetime.now(UTC).date() - timedelta(days=1)
-    log = Path("results") / "job_log.csv"
+    log = root / "meta" / "scheduler" / "job_log.csv"
+    reports = reports or root / "reports" / "dq"
     results = {}
     with scheduler.job_lock(root / "meta" / "scheduler" / ".lock") as locked:
         if not locked:

@@ -96,9 +96,13 @@ class KrakenNormalizer(PushBookNormalizer):
                 continue
             if symbol not in self.known:
                 self.engine.counters["checksum_skipped_book_unknown"] += 1
+                if book.crossed():
+                    self.engine.counters[f"crossed_unverified/{symbol}"] += 1
                 continue
             if kraken_checksum(book.top(BID, 10), book.top(ASK, 10)) == int(row["checksum"]):
                 self.engine.counters["checksum_ok"] += 1
+                if book.crossed():  # the venue's own book is crossed (checksum over it matched)
+                    self.engine.counters[f"crossed_confirmed/{symbol}"] += 1
             else:
                 self.engine.counters["checksum_fail"] += 1
                 self.distrust(symbol, "checksum", rec.ts, last_good)

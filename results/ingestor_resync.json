@@ -1,0 +1,20 @@
+{
+  "binance-usdm": {
+    "max_s": 2.945,
+    "median_s": 0.684,
+    "resyncs": 15,
+    "source": "tickdb ingestor vs mock venue (tests); not the live shared recorder"
+  },
+  "coinbase": {
+    "max_s": 0.004,
+    "median_s": 0.003,
+    "resyncs": 13,
+    "source": "tickdb ingestor vs mock venue (tests); not the live shared recorder"
+  },
+  "kraken": {
+    "max_s": 0.004,
+    "median_s": 0.002,
+    "resyncs": 15,
+    "source": "tickdb ingestor vs mock venue (tests); not the live shared recorder"
+  }
+}
