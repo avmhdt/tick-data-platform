@@ -346,3 +346,22 @@ def test_gap_report_files(tmp_path: Path) -> None:
     text = path.read_text()
     assert f"| {DAY} | 2 |" in text
     assert f"| {NEXT} | no report |" in text
+
+
+def test_book_checks_summary(tmp_path: Path) -> None:
+    from tickdb.dq import report
+
+    raw = kraken_day(tmp_path / "raw")
+    binance_day(raw)
+    data = tmp_path / "data"
+    compact_day(raw, data, "kraken", DAY, ("BTC/USD",))
+    compact_day(raw, data, "binance-usdm", DAY, ("BTCUSDT",))
+    checks = report.book_checks(data, DAY, DAY)
+    assert checks["kraken"]["checksum_ok"] == 2
+    assert checks["kraken"]["checksum_fail"] == 1
+    assert checks["kraken"]["crossed_bbo"] == 0
+    assert checks["binance-usdm"]["ckpt_match"] == 1
+    assert checks["binance-usdm"]["ckpt_match_pct"] == 50.0
+    assert checks["binance-usdm"]["seq_gaps"] == 1
+    assert checks["binance-usdm"]["seq_gaps_resynced"] == 1
+    assert checks["binance-usdm"]["resync_median_s"] is not None

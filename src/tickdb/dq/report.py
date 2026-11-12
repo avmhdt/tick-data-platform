@@ -100,3 +100,49 @@ def write_summary(out: Path, first: date, last: date) -> Path:
     target = out / "summary.md"
     target.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return target
+
+
+COUNTED = ("checksum_ok", "checksum_fail", "ckpt_match", "ckpt_mismatch", "ckpt_skipped")
+
+
+def book_checks(data_root: Path, first: date, last: date) -> dict[str, dict[str, Any]]:
+    """AC-W-05 evidence per venue over [first, last] from compaction records and gaps."""
+    out: dict[str, dict[str, Any]] = {}
+    day = first
+    while day <= last:
+        for path in sorted((data_root / "meta" / "compaction").glob(f"venue=*/date={day}.json")):
+            venue = path.parent.name.removeprefix("venue=")
+            rec = orjson.loads(path.read_bytes())
+            c = rec.get("counters", {})
+            zero = dict.fromkeys(COUNTED, 0) | {"crossed_bbo": 0, "seq_gaps": 0}
+            v = out.setdefault(venue, {"days": 0, **zero, "resync_seconds": []})
+            v["days"] += 1
+            for key in (
+                "checksum_ok",
+                "checksum_fail",
+                "ckpt_match",
+                "ckpt_mismatch",
+                "ckpt_skipped",
+            ):
+                v[key] += int(c.get(key, 0))
+            v["crossed_bbo"] += sum(int(n) for k, n in c.items() if k.startswith("bbo_crossed/"))
+        for gap in load_gaps(data_root, day):
+            if gap["channel"] != "book_l2" or gap["venue"] not in out:
+                continue
+            v = out[gap["venue"]]
+            if gap["kind"] == "seq_gap":
+                v["seq_gaps"] += 1
+                v.setdefault("seq_gaps_resynced", 0)
+                v["seq_gaps_resynced"] += gap["status"] == "partial"
+            if gap["status"] == "partial":  # closed by a snapshot: detection -> validated
+                v["resync_seconds"].append(gap["duration_s"])
+        day += timedelta(days=1)
+    for v in out.values():
+        secs = sorted(v.pop("resync_seconds"))
+        v["resyncs"] = len(secs)
+        v["resync_median_s"] = secs[len(secs) // 2] if secs else None
+        total = v["checksum_ok"] + v["checksum_fail"]
+        v["checksum_match_pct"] = round(100 * v["checksum_ok"] / total, 4) if total else None
+        compared = v["ckpt_match"] + v["ckpt_mismatch"]
+        v["ckpt_match_pct"] = round(100 * v["ckpt_match"] / compared, 3) if compared else None
+    return out

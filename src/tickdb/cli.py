@@ -794,3 +794,24 @@ def scheduler_run(
         report.write_summary(reports, _date(2026, 11, 12), day)
         retention.apply(root, cfg.retention.raw_spool_days, dry_run=False)
     typer.echo(scheduler.status_line(results))
+
+
+@dq_app.command("book-checks")
+def dq_book_checks(
+    from_: FromOpt,
+    to: Annotated[str, typer.Option("--to", help="Last UTC date (inclusive).")],
+    dest: DestOpt = None,
+    config: ConfigOpt = None,
+) -> None:
+    """AC-W-05 evidence: checksums, checkpoint matches, crossed BBO, resync times.
+
+    Example: tickdb dq book-checks --from 2026-11-12 --to 2026-11-14
+    """
+    from datetime import date as _date
+
+    from tickdb.dq import report
+
+    _, cfg = _load(config)
+    root = dest or Path(cfg.data_root).expanduser()
+    checks = report.book_checks(root, _date.fromisoformat(from_), _date.fromisoformat(to))
+    typer.echo(json.dumps(checks, indent=2))
