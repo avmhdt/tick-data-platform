@@ -1,6 +1,7 @@
 <clickhouse>
-    <!-- Memory: leave half the WSL VM to the shared host (NFR-11, R-08). -->
-    <max_server_memory_usage_to_ram_ratio>0.5</max_server_memory_usage_to_ram_ratio>
+    <!-- Memory: at most 0.2 of the WSL VM (about 12 GB of 62), so the shared PC keeps more than
+         30 GB free (shared rule); NFR-11 asks for at most 0.5. -->
+    <max_server_memory_usage_to_ram_ratio>0.2</max_server_memory_usage_to_ram_ratio>
     <!-- Inside the container; compose publishes 8123 on 127.0.0.1 only (NFR-08). -->
     <listen_host>0.0.0.0</listen_host>
     <logger>
