@@ -65,7 +65,7 @@
     "ckpt_match": 0,
     "ckpt_mismatch": 0,
     "ckpt_skipped": 0,
-    "crossed_bbo": 2117,
+    "crossed_bbo": 0,
     "seq_gaps": 0,
     "crossed_bbo_venue_confirmed": 0,
     "exceptions": [],
@@ -76,7 +76,7 @@
     "resync_source": "shared recorder (crypto-lob-alpha), last good message to snapshot",
     "verdicts": {
       "checksums": "pass",
-      "crossed_bbo": "miss",
+      "crossed_bbo": "pass",
       "resync_median": "pass"
     },
     "seq_breaks_resynced": true,
