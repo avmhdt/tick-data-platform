@@ -258,7 +258,7 @@ class Engine:
     def _classify_trade_gaps(
         self, symbol: str, ids: list[int], ts: list[int], source: list[str]
     ) -> None:
-        present = set(ids)
+        present = dict(zip(ids, source, strict=True))
         ws = sorted((t, i) for i, t, s in zip(ids, ts, source, strict=True) if s == "ws")
         ws_ts = [t for t, _ in ws]
         ws_ids = sorted(i for _, i in ws)
@@ -285,16 +285,18 @@ class Engine:
                 self.gaps.append(gap)
                 self.counters["gap_trade_id_gap"] += 1
 
-    def _settle(self, symbol: str, gap: Gap, lo: int, hi: int, present: set[int]) -> None:
+    def _settle(self, symbol: str, gap: Gap, lo: int, hi: int, present: dict[int, str]) -> None:
         missing = max(0, hi - lo + 1)
-        got = sum(1 for i in range(lo, hi + 1) if i in present) if missing else 0
+        found = [present[i] for i in range(lo, hi + 1) if i in present] if missing else []
+        got = len(found)
         gap.seq_from, gap.seq_to = (lo, hi) if missing else (None, None)
         gap.recovered_rows = got
+        label = "binance_vision" if "vendor" in found and "rest" not in found else "rest_backfill"
         if missing == 0 or got == missing:
             gap.status = "recovered"
-            gap.recovery = "rest_backfill" if got else "none"
+            gap.recovery = label if got else "none"
         elif got:
-            gap.status, gap.recovery = "partial", "rest_backfill"
+            gap.status, gap.recovery = "partial", label
         elif symbol in self.backfilled:
             gap.status, gap.recovery = "unrecoverable", "rest_backfill"
         else:

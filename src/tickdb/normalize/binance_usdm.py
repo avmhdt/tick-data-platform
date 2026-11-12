@@ -163,11 +163,11 @@ class BinanceUsdmNormalizer(VenueNormalizer):
         sync.synced, sync.known, sync.last_u, sync.pending = False, False, None, None
 
     def on_backfill(self, symbol: str, rec: RawRecord) -> None:
+        source = str((rec.ctrl or {}).get("source", "rest"))  # "vendor": data.binance.vision
         for t in orjson.loads(rec.payload):
             ts = int(t["T"]) * MS
-            self.engine.trade(
-                symbol, ts, ts, str(t["a"]), t["p"], t["q"], -1 if t["m"] else 1, "rest", rec.ts
-            )
+            side = -1 if t["m"] else 1
+            self.engine.trade(symbol, ts, ts, str(t["a"]), t["p"], t["q"], side, source, rec.ts)
 
     # ------------------------------------------------------------------ frames
 

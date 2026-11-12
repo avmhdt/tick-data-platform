@@ -647,11 +647,18 @@ def backfill_cmd(
 async def _backfill(
     bf: Any, name: str, cfg: TickdbConfig, needs: list[Any], root: Path, day: Any
 ) -> tuple[int, int, str]:
+    from datetime import timedelta
+
     filler = bf.Backfiller(name, cfg.venues[name].rest_url)
     received = 0
     for need in needs:
-        received += await filler.fetch(need)
+        got = await filler.fetch(need)
+        if got < need.hi - need.lo + 1 and name == "binance-usdm":
+            got = max(got, filler.vision(need, root, [day - timedelta(days=1), day]))
+        received += got
     await filler.http.aclose()
+    for error in filler.errors:
+        typer.echo(f"backfill note: {error}", err=True)
     return received, filler.requests, str(filler.write(root, day))
 
 

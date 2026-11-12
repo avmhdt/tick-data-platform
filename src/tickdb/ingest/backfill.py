@@ -85,6 +85,12 @@ class Backfiller:
         self.bucket = bucket or TokenBucket(*RATES[venue])
         self.records: list[bytes] = []
         self.requests = 0
+        self.errors: list[str] = []
+
+    def _spool(self, need: Need, ctrl: dict[str, Any], body: bytes, fetched: int) -> None:
+        ctrl = {"k": "rest_backfill", "symbol": need.symbol, "need": [need.lo, need.hi], **ctrl}
+        line = b"%d\t!%s\t%s" % (fetched, orjson.dumps(ctrl), body.replace(b"\n", b" "))
+        self.records.append(line)
 
     async def _get(self, url: str, params: dict[str, Any], need: Need) -> Any:
         await self.bucket.acquire(WEIGHT[self.venue])
@@ -104,7 +110,36 @@ class Backfiller:
         return orjson.loads(response.content)
 
     async def fetch(self, need: Need) -> int:
-        """Fetch ``need.lo..need.hi``; return how many ids of that range were received."""
+        """Fetch ``need.lo..need.hi``; return how many ids of that range were received. A venue
+        rejection (e.g. Binance only searches the last two days) is recorded, not raised."""
+        try:
+            return await self._fetch(need)
+        except httpx.HTTPStatusError as exc:
+            self.errors.append(f"{need.symbol} {need.lo}-{need.hi}: {exc.response.text[:200]}")
+            return 0
+
+    def vision(self, need: Need, data_root: Path, days: list[date]) -> int:
+        """binance-usdm fallback: the missing ids from data.binance.vision daily files."""
+        from tickdb.ingest import binance_vision as bv
+
+        got: list[dict[str, Any]] = []
+        for day in days:
+            try:
+                path = bv.fetch(data_root, need.symbol, day)
+            except (httpx.HTTPError, ValueError) as exc:
+                self.errors.append(f"binance-vision {need.symbol} {day}: {exc}"[:300])
+                continue
+            got += bv.rows(path, need.lo, need.hi)
+        if got:
+            ctrl = {
+                "source": "vendor",
+                "endpoint": "binance-vision",
+                "files": [str(d) for d in days],
+            }
+            self._spool(need, ctrl, orjson.dumps(got), time.time_ns())
+        return len({r["a"] for r in got})
+
+    async def _fetch(self, need: Need) -> int:
         got: set[int] = set()
         if self.venue == "binance-usdm":
             next_id = need.lo

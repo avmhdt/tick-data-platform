@@ -128,3 +128,42 @@ async def test_kraken_pages_by_since(tmp_path: Path) -> None:
 
 def test_plan_without_gaps(tmp_path: Path) -> None:
     assert bf.plan(tmp_path, "kraken", DAY) == []
+
+
+async def test_binance_vision_fallback_after_rest_refuses(tmp_path: Path) -> None:
+    import zipfile
+
+    from tickdb.ingest import binance_vision as bv
+
+    raw = binance_gap_day(tmp_path / "raw")
+    data = tmp_path / "data"
+    compact_day(raw, data, "binance-usdm", DAY, ("BTCUSDT",))
+    target = bv.local_path(data, "BTCUSDT", DAY)
+    target.parent.mkdir(parents=True)
+    t0 = 1_794_182_400_000
+    lines = [
+        "agg_trade_id,price,quantity,first_trade_id,last_trade_id,transact_time,is_buyer_maker"
+    ]
+    lines += [f"{i},100.0,0.5,{i},{i},{t0 + 3000 + i},true" for i in range(500, 509)]
+    with zipfile.ZipFile(target, "w") as zf:
+        zf.writestr("BTCUSDT-aggTrades.csv", "\n".join(lines) + "\n")
+    target.with_suffix(".zip.ok").write_text("verified")
+    assert [r["a"] for r in bv.rows(target, 502, 504)] == [502, 503, 504]
+
+    refuse = httpx.Response(400, json={"code": -4166, "msg": "Search window is restricted"})
+    filler = _filler("binance-usdm", lambda r: refuse)
+    for need in bf.plan(data, "binance-usdm", DAY):
+        assert await filler.fetch(need) == 0
+        assert filler.vision(need, data, [DAY]) == need.hi - need.lo + 1
+    assert any("restricted" in e for e in filler.errors)
+    filler.write(data, DAY)
+    compact_day(raw, data, "binance-usdm", DAY, ("BTCUSDT",))
+    trade_gaps = [g for g in gaps(data, "binance-usdm") if g["channel"] == "trades"]
+    assert {(g["status"], g["recovery"]) for g in trade_gaps} == {("recovered", "binance_vision")}
+    vendor = [
+        t
+        for t in table(data, "trades", "binance-usdm", "BTCUSDT").to_pylist()
+        if t["source"] == "vendor"
+    ]
+    assert len(vendor) == 4
+    assert all(t["side"] == -1 for t in vendor)  # buyer is maker: seller aggressed
