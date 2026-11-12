@@ -7,8 +7,8 @@ the book this replay rebuilt, on levels nobody touched around it:
 - binance-usdm (sequence-aligned): the book after the diff that straddles ``lastUpdateId``,
   top 100 levels per side, excluding levels touched by that diff and by any later diff
   already applied when the comparison runs (the replay cannot rewind the book);
-- coinbase (time-aligned): the book at the response's receive time, top 20 levels per side,
-  excluding levels updated within +-500 ms; the check runs once replay passes ``t + 500 ms``.
+- coinbase: checked separately in ``tickdb.dq.checkpoints`` (aligned by sequence through the
+  heartbeat channel, because the REST book is about 1 s stale).
 
 Counts go to the engine counters: ``ckpt_match``, ``ckpt_mismatch``, ``ckpt_skipped``.
 """

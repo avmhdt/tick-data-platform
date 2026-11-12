@@ -179,7 +179,6 @@ def test_coinbase_unknown_book_is_archived_and_gap_recovered(tmp_path: Path) -> 
         (False, "ws.g2", 0.0),
     ]
     assert result.counters["updates_book_unknown"] == 1
-    assert result.counters["ckpt_match"] == 1
     kinds = {(g["channel"], g["kind"], g["status"]) for g in gaps(data, "coinbase")}
     assert ("book_l2", "disconnect", "partial") in kinds
     assert ("trades", "disconnect", "open") in kinds  # closes at end of day; backfill decides
@@ -365,3 +364,52 @@ def test_book_checks_summary(tmp_path: Path) -> None:
     assert checks["binance-usdm"]["seq_gaps"] == 1
     assert checks["binance-usdm"]["seq_gaps_resynced"] == 1
     assert checks["binance-usdm"]["resync_median_s"] is not None
+
+
+def test_coinbase_checkpoints_aligned_by_sequence(tmp_path: Path) -> None:
+    from tickdb.dq import checkpoints as ck
+
+    raw = RawDay(tmp_path / "raw", "coinbase", DAY)
+    raw.control(
+        0.0,
+        {
+            "k": "state",
+            "state": {"books": {"BTC-USD": {"state": "LIVE"}}, "active": {"ws": "ws.g1"}},
+        },
+    )
+    raw.frame(
+        0.5,
+        "ws.g1",
+        {
+            "type": "snapshot",
+            "product_id": "BTC-USD",
+            "bids": [["99.00", "2.0"]],
+            "asks": [["101.00", "3.0"]],
+        },
+    )
+    raw.frame(1.0, "ws.g1", {"type": "heartbeat", "product_id": "BTC-USD", "sequence": 10})
+    raw.frame(
+        1.5,
+        "ws.g1",
+        {
+            "type": "l2update",
+            "product_id": "BTC-USD",
+            "changes": [["buy", "99.00", "5.0"]],
+            "time": "2026-11-09T00:00:01.5Z",
+        },
+    )
+    raw.frame(2.0, "ws.g1", {"type": "heartbeat", "product_id": "BTC-USD", "sequence": 20})
+    raw.frame(5.0, "ws.g1", {"type": "heartbeat", "product_id": "BTC-USD", "sequence": 30})
+    stale = {
+        "sequence": 9,
+        "bids": [["99.00", "2.0", 1]],
+        "asks": [["101.00", "3.0", 1]],
+    }  # the book of t=1.0
+    wrong = {"sequence": 25, "bids": [["99.00", "7.0", 1]], "asks": [["101.00", "3.0", 1]]}
+    raw.control(2.4, {"k": "checkpoint", "symbol": "BTC-USD"}, stale)  # received 1.4 s later
+    raw.control(5.1, {"k": "checkpoint", "symbol": "BTC-USD"}, wrong)
+    raw.write()
+    result = ck.check_day([tmp_path / "raw"], {}, DAY, ("BTC-USD",))["BTC-USD"]
+    assert result["compared"] == 2
+    assert result["match_1.0s"] == 1  # the stale one matches at its aligned time
+    assert result["match_pct_1.0s"] == 50.0

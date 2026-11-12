@@ -815,3 +815,33 @@ def dq_book_checks(
     root = dest or Path(cfg.data_root).expanduser()
     checks = report.book_checks(root, _date.fromisoformat(from_), _date.fromisoformat(to))
     typer.echo(json.dumps(checks, indent=2))
+
+
+@dq_app.command("checkpoints")
+def dq_checkpoints(
+    date_: DateOpt,
+    dest: DestOpt = None,
+    raw: Annotated[Path | None, typer.Option(help="Raw root; default the shared mirror.")] = None,
+    config: ConfigOpt = None,
+) -> None:
+    """Coinbase REST checkpoints vs the rebuilt book, aligned by sequence (AC-W-05).
+
+    Example: tickdb dq checkpoints --date 2026-11-12
+    """
+    from datetime import date as _date
+
+    import orjson as _orjson
+
+    from tickdb.dq import checkpoints as ck
+
+    _, cfg = _load(config)
+    root = dest or Path(cfg.data_root).expanduser()
+    day = _date.fromisoformat(date_)
+    roots = [_raw_root(root, raw), root / "raw" / "backfill"]
+    result = ck.check_day(
+        roots, ck.carry_for(root, day), day, tuple(cfg.venues["coinbase"].symbols)
+    )
+    path = root / "meta" / "checkpoints" / "venue=coinbase" / f"date={date_}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(_orjson.dumps(result, option=_orjson.OPT_INDENT_2))
+    typer.echo(json.dumps(result))

@@ -137,6 +137,7 @@ def book_checks(data_root: Path, first: date, last: date) -> dict[str, dict[str,
             if gap["status"] == "partial":  # closed by a snapshot: detection -> validated
                 v["resync_seconds"].append(gap["duration_s"])
         day += timedelta(days=1)
+    _coinbase_checkpoints(data_root, first, last, out)
     for v in out.values():
         secs = sorted(v.pop("resync_seconds"))
         v["resyncs"] = len(secs)
@@ -146,3 +147,21 @@ def book_checks(data_root: Path, first: date, last: date) -> dict[str, dict[str,
         compared = v["ckpt_match"] + v["ckpt_mismatch"]
         v["ckpt_match_pct"] = round(100 * v["ckpt_match"] / compared, 3) if compared else None
     return out
+
+
+def _coinbase_checkpoints(
+    data_root: Path, first: date, last: date, out: dict[str, dict[str, Any]]
+) -> None:
+    """Coinbase checkpoint results come from ``tickdb dq checkpoints`` (sequence-aligned)."""
+    if "coinbase" not in out:
+        return
+    v = out["coinbase"]
+    v["ckpt_match"] = v["ckpt_mismatch"] = 0
+    day = first
+    while day <= last:
+        path = data_root / "meta" / "checkpoints" / "venue=coinbase" / f"date={day}.json"
+        if path.exists():
+            for sym in orjson.loads(path.read_bytes()).values():
+                v["ckpt_match"] += sym["match_1.0s"]
+                v["ckpt_mismatch"] += sym["compared"] - sym["match_1.0s"]
+        day += timedelta(days=1)

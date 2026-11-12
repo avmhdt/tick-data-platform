@@ -14,12 +14,8 @@ from __future__ import annotations
 
 from typing import Any
 
-import orjson
-
 from tickdb.ingest.book import ASK, BID, L2Book
-from tickdb.normalize.checkpoints import WINDOW_NS, CheckpointChecker
 from tickdb.normalize.engine import Engine, VenueNormalizer
-from tickdb.normalize.rawlog import RawRecord
 
 
 class PushBookNormalizer(VenueNormalizer):
@@ -32,25 +28,6 @@ class PushBookNormalizer(VenueNormalizer):
         self.books = {s: L2Book() for s in engine.symbols}
         self.rx: dict[str, int] = {}  # per-connection receive counter (book seq)
         self.seeded = False
-        self.ckpt = CheckpointChecker(engine, depth=20)
-        self.last_touch: dict[str, dict[tuple[int, float], int]] = {s: {} for s in engine.symbols}
-
-    def feed(self, rec: RawRecord) -> None:
-        super().feed(rec)
-        if self.ckpt.pending:
-            self.ckpt.due(rec.ts, self.books, self.known)
-
-    def on_control(self, rec: RawRecord) -> None:
-        ctrl = rec.ctrl or {}
-        symbol = str(ctrl.get("symbol", ""))
-        if ctrl.get("k") == "checkpoint" and symbol in self.books and rec.payload:
-            if symbol not in self.known:
-                self.engine.counters["ckpt_skipped"] += 1
-            else:
-                self.ckpt.add(symbol, rec.ts, orjson.loads(rec.payload), rec.ts + WINDOW_NS)
-                recent = {k for k, t in self.last_touch[symbol].items() if t >= rec.ts - WINDOW_NS}
-                self.ckpt.pending[-1].touched.update(recent)
-        super().on_control(rec)
 
     def next_seq(self, conn: str) -> int:
         self.rx[conn] = self.rx.get(conn, 0) + 1
@@ -130,12 +107,8 @@ class PushBookNormalizer(VenueNormalizer):
             self.engine.counters["updates_while_resyncing"] += 1
             return False
         book = self.books[symbol]
-        touch = self.last_touch[symbol]
         for side, price, qty in levels:
             book.apply(side, price, qty)
-            touch[(side, float(price))] = ts_recv
-        if self.ckpt.pending:
-            self.ckpt.touch(symbol, ts_recv, levels)
         self.engine.book(symbol, ts_exchange, ts_recv, self.next_seq(conn), False, conn, levels)
         if symbol not in self.known:
             self.engine.counters["updates_book_unknown"] += 1
