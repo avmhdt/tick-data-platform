@@ -14,6 +14,7 @@ from typing import Any
 import orjson
 
 from tickdb.ingest.book import ASK, BID
+from tickdb.normalize.engine import need_of as _need
 from tickdb.normalize.pushbook import PushBookNormalizer
 from tickdb.normalize.rawlog import RawRecord
 from tickdb.timeutil import iso_to_ns
@@ -27,7 +28,16 @@ class CoinbaseNormalizer(PushBookNormalizer):
             ts = iso_to_ns(t["time"])
             side = 1 if t["side"] == "sell" else -1  # maker side, as on the websocket
             self.engine.trade(
-                symbol, ts, ts, str(t["trade_id"]), t["price"], t["size"], side, "rest", rec.ts
+                symbol,
+                ts,
+                ts,
+                str(t["trade_id"]),
+                t["price"],
+                t["size"],
+                side,
+                "rest",
+                rec.ts,
+                _need(rec),
             )
 
     def on_frame(self, rec: RawRecord) -> None:

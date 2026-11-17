@@ -26,6 +26,7 @@ import orjson
 from tickdb.ingest.book import ASK, BID, L2Book
 from tickdb.normalize.checkpoints import compare
 from tickdb.normalize.engine import Engine, VenueNormalizer
+from tickdb.normalize.engine import need_of as _need
 from tickdb.normalize.rawlog import RawRecord
 
 MS = 1_000_000
@@ -167,7 +168,9 @@ class BinanceUsdmNormalizer(VenueNormalizer):
         for t in orjson.loads(rec.payload):
             ts = int(t["T"]) * MS
             side = -1 if t["m"] else 1
-            self.engine.trade(symbol, ts, ts, str(t["a"]), t["p"], t["q"], side, source, rec.ts)
+            self.engine.trade(
+                symbol, ts, ts, str(t["a"]), t["p"], t["q"], side, source, rec.ts, _need(rec)
+            )
 
     # ------------------------------------------------------------------ frames
 

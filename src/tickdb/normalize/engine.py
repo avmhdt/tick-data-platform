@@ -119,6 +119,7 @@ class Engine:
         side: int,
         source: str = "ws",
         ts_fetch: int | None = None,
+        need: list[int] | None = None,
     ) -> None:
         """One trade. Duplicates (same id) keep the first seen; ws rows come first in replay
         order, so the source priority ws > rest of DQ-03 holds. REST rows carry
@@ -126,6 +127,15 @@ class Engine:
         if symbol not in self._seen:
             self.counters["unknown_symbol"] += 1
             return
+        if source != "ws":
+            # A REST page can hold trades outside the gap, even from another day: only the
+            # missing ids that fall on this day belong here (DQ-02, DQ-06).
+            if need is not None and not need[0] <= int(trade_id) <= need[1]:
+                self.counters["rest_rows_outside_need"] += 1
+                return
+            if not self.start_ns <= ts_recv < self.end_ns:
+                self.counters["rest_rows_outside_day"] += 1
+                return
         seen = self._seen[symbol]
         if trade_id in seen:
             self.counters["dup_trades_removed"] += 1
@@ -301,6 +311,12 @@ class Engine:
             gap.status, gap.recovery = "unrecoverable", "rest_backfill"
         else:
             gap.status = "open"  # waiting for REST backfill
+
+
+def need_of(rec: RawRecord) -> list[int] | None:
+    """The missing id range a backfill record was fetched for."""
+    need = (rec.ctrl or {}).get("need")
+    return [int(need[0]), int(need[1])] if need else None
 
 
 class VenueNormalizer:

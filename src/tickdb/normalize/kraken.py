@@ -18,6 +18,7 @@ import orjson
 
 from tickdb.ingest.book import ASK, BID, kraken_checksum
 from tickdb.normalize.engine import Engine
+from tickdb.normalize.engine import need_of as _need
 from tickdb.normalize.pushbook import PushBookNormalizer
 from tickdb.normalize.rawlog import RawRecord
 from tickdb.timeutil import iso_to_ns
@@ -46,7 +47,7 @@ class KrakenNormalizer(PushBookNormalizer):
             trade_id = str(_rest[-1])
             self.engine.trade(
                 symbol, ts, ts, trade_id, str(price), str(volume), 1 if side == "b" else -1,
-                "rest", rec.ts,
+                "rest", rec.ts, _need(rec),
             )  # fmt: skip
 
     def on_frame(self, rec: RawRecord) -> None:

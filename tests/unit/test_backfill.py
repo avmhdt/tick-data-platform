@@ -167,3 +167,34 @@ async def test_binance_vision_fallback_after_rest_refuses(tmp_path: Path) -> Non
     ]
     assert len(vendor) == 4
     assert all(t["side"] == -1 for t in vendor)  # buyer is maker: seller aggressed
+
+
+async def test_rest_rows_outside_need_or_day_are_dropped(tmp_path: Path) -> None:
+    """A REST page can return trades around the gap, even from the previous day; only the
+    missing ids that fall on the day are kept (DQ-02), so ClickHouse's date partition and the
+    day's Parquet partition hold the same rows."""
+    raw = binance_gap_day(tmp_path / "raw")
+    data = tmp_path / "data"
+    compact_day(raw, data, "binance-usdm", DAY, ("BTCUSDT",))
+    t0 = 1_794_182_400_000
+
+    def api(request: httpx.Request) -> httpx.Response:
+        rows = [
+            {"a": 400, "p": "1", "q": "1", "f": 1, "l": 1, "T": t0 - 5_000, "m": False}
+        ]  # day before
+        rows += [
+            {"a": i, "p": "1", "q": "1", "f": i, "l": i, "T": t0 + 3000 + i, "m": False}
+            for i in range(502, 509)
+        ]
+        return httpx.Response(200, json=rows)
+
+    filler = _filler("binance-usdm", api)
+    for need in bf.plan(data, "binance-usdm", DAY):
+        await filler.fetch(need)
+    filler.write(data, DAY)
+    result = compact_day(raw, data, "binance-usdm", DAY, ("BTCUSDT",))
+    trades = table(data, "trades", "binance-usdm", "BTCUSDT").to_pylist()
+    assert sorted(int(t["trade_id"]) for t in trades) == list(range(500, 509))
+    assert result.counters["rest_rows_outside_need"] >= 1
+    start = 1_794_182_400_000_000_000
+    assert all(start <= t["ts_recv"] < start + 86_400_000_000_000 for t in trades)
