@@ -65,7 +65,7 @@ cd ~/tick-data-platform-deploy && ~/.local/bin/uv run --no-sync tickdb mirror st
 The cron entry (WSL crontab of user `ze`; remove it after 2026-12-19):
 
 ```cron
-# tdp-mirror: tick-data-platform read-only copy of the shared raw archive, window 2026-11-08..12-07. Remove after 2026-12-09.
+# tdp-mirror: tick-data-platform read-only copy of the shared raw archive from 2026-11-08 (window 2026-11-18..12-17). Remove after 2026-12-19.
 25 * * * * cd /home/ze/tick-data-platform-deploy && nice -n 10 ionice -c3 /home/ze/.local/bin/uv run --no-sync tickdb mirror run --source /home/ze/data/crypto-lob-alpha --dest /home/ze/data/tick-data-platform --from 2026-11-08 --to 2026-12-17 --exclude binance-usdm:ticker --guard-path /mnt/g --floor-gb 150 --rate-mb 8 >> /home/ze/data/tick-data-platform/meta/mirror/run.log 2>&1 # tdp-mirror
 ```
 
