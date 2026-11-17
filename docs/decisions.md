@@ -62,6 +62,7 @@ the build. `DECISIONS.md` overrides the spec, and the spec overrides `README.md`
 | 2026-11-12 | AC-W-05 crossed BBO, Kraken | Owner, quoted: "Publish as a venue finding (Recommended)". DQ-05 still means zero crossed rows from this project's own processing. Crosses that the venue published, confirmed because every checksum over the crossed book matched, are flagged separately in the data-quality output, published as a finding (2,117 rows on Kraken BTC/USD, 2026-11-08 19:15:39 to 19:26:54 UTC) and listed as a documented exception. |
 | 2026-11-12 | AC-W-05 median resync, Binance | Owner, quoted: "Documented exception (Recommended)". The miss follows from the one-shared-capture decision: the measured time (median 27.6 s on 2026-11-07 to 11-11) is the shared recorder's, from its last good message to the validating snapshot after its reconnects. It is published next to this project's ingestor's tested figure (mock venues), each labelled. Threshold (≤ 10 s) unchanged. |
 | 2026-11-12 | **Correction to the Kraken crossed-BBO finding** | The 2,117 crossed rows on Kraken BTC/USD, 2026-11-08, were **this project's processing, not the venue's**. Kraken sends no delete for a level that leaves the subscribed 1,000-level scope; the normalizer truncated its book like Kraken, but the BBO replay did not, so a 74,062.4 bid that was cancelled while out of scope stayed in the BBO book and crossed it later. The venue-confirmed check added for the ruling found 0 crossed books behind a matching checksum, which exposed it. Fixed: the BBO replay truncates to the subscribed depth after every batch, as the venue does (D-06), and Kraken is re-derived. The owner's ruling stays as the rule for any future venue-confirmed cross; there is no such cross to publish for 11-08. |
+| 2026-11-17 | AC-W-01 window after the second host outage | WSL was down from 2026-11-12 19:02:42 to 11-15 17:43:45 UTC (about 70.7 h; boot history, shared raw archive and the mirror's run log agree), so the window 2026-11-12 to 12-11 failed on its first day; it is published as a failed window. A further 40 min outage on 11-17 (18:17:46 to 18:58:01 UTC) came with the move off the failing D: drive. Owner, quoted: "11-18 to 12-17 (Recommended)". **The 30-day window is 2026-11-18 to 2026-12-17**, in line with crypto-lob-alpha's window and leaving both allowed days below 99 % unused. The shared recorder runs to at least 2026-12-18 02:00 UTC (crypto-lob-alpha's session records that); the Windows Update hold is being extended to about 2026-12-22. Thresholds unchanged. The mirror's cron line becomes `--to 2026-12-17`, removed after 2026-12-19. |
 
 ## Spec decisions (section 3)
 
@@ -180,8 +181,9 @@ the build. `DECISIONS.md` overrides the spec, and the spec overrides `README.md`
     zstd frame decoding (`tickdb mirror verify`; a frame the recorder itself cut in a crash is
     reported, not counted as a failure), and the recorder's per-minute ingest p99 during
     mirror runs no worse than otherwise (`scripts/recorder_impact.py`).
-14. **Capture Day 1 is 2026-11-12** (owner ruling of 2026-11-11, after the host crash; the
-    first window, 2026-11-08 to 12-07, failed). The 30-day window is 2026-11-12 to 2026-12-11.
+14. **Capture Day 1 is 2026-11-18** (owner ruling of 2026-11-17). Earlier windows failed:
+    2026-11-08 to 12-07 (host crash, 11-11) and 2026-11-12 to 12-11 (70.7 h outage, 11-12 to
+    11-15). The 30-day window is 2026-11-18 to 2026-12-17.
 
 ### M3 (2026-11-11)
 
