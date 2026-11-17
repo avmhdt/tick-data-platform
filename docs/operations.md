@@ -59,25 +59,28 @@ job copies each closed hour into `$DATA_ROOT/raw/external/lob-alpha/`.
 ```bash
 cd ~/tick-data-platform-deploy && ~/.local/bin/uv run --no-sync tickdb mirror status \
   --source ~/data/crypto-lob-alpha --dest ~/data/tick-data-platform \
-  --from 2026-11-08 --to 2026-12-07 --exclude binance-usdm:ticker
+  --from 2026-11-08 --to 2026-12-17 --exclude binance-usdm:ticker
 ```
 
-The cron entry (WSL crontab of user `ze`; remove it after 2026-12-09):
+The cron entry (WSL crontab of user `ze`; remove it after 2026-12-19):
 
 ```cron
 # tdp-mirror: tick-data-platform read-only copy of the shared raw archive, window 2026-11-08..12-07. Remove after 2026-12-09.
-25 * * * * cd /home/ze/tick-data-platform-deploy && nice -n 10 ionice -c3 /home/ze/.local/bin/uv run --no-sync tickdb mirror run --source /home/ze/data/crypto-lob-alpha --dest /home/ze/data/tick-data-platform --from 2026-11-08 --to 2026-12-07 --exclude binance-usdm:ticker --guard-path /mnt/d --floor-gb 150 --rate-mb 8 >> /home/ze/data/tick-data-platform/meta/mirror/run.log 2>&1 # tdp-mirror
+25 * * * * cd /home/ze/tick-data-platform-deploy && nice -n 10 ionice -c3 /home/ze/.local/bin/uv run --no-sync tickdb mirror run --source /home/ze/data/crypto-lob-alpha --dest /home/ze/data/tick-data-platform --from 2026-11-08 --to 2026-12-17 --exclude binance-usdm:ticker --guard-path /mnt/g --floor-gb 150 --rate-mb 8 >> /home/ze/data/tick-data-platform/meta/mirror/run.log 2>&1 # tdp-mirror
 ```
 
 ## Capture window
 
-**Day 1 is 2026-11-12** (owner ruling, 2026-11-11). The 30-day AC-W-01 window runs from
-2026-11-12 00:00 to 2026-12-11 24:00 UTC. The shared recorder keeps running to at least
-2026-12-12 02:00 UTC, within the Windows Update pause to about 2026-12-15.
+**Day 1 is 2026-11-18** (owner ruling, 2026-11-17). The 30-day AC-W-01 window runs from
+2026-11-18 00:00 to 2026-12-17 24:00 UTC. The shared recorder keeps running to at least
+2026-12-18 02:00 UTC; the Windows Update hold is extended to about 2026-12-22.
 
-The first window, 2026-11-08 to 2026-12-07 (ruling of 2026-11-10), **failed** on 2026-11-11:
-the whole PC crashed and WSL was down from about 07:00 to 19:37:54 UTC, about 12.6 h on every
-stream against the 72 min a day allows. It is published as a finding.
+Failed windows, published as findings:
+
+| Window | Ruled | Failed on | Cause |
+|---|---|---|---|
+| 2026-11-08 to 12-07 | 2026-11-10 | 2026-11-11 | Whole PC crashed; WSL down about 07:00 to 19:37:54 UTC (about 12.6 h) |
+| 2026-11-12 to 12-11 | 2026-11-11 | 2026-11-12 | WSL down 2026-11-12 19:02:42 to 11-15 17:43:45 UTC (about 70.7 h) |
 
 ## Ingestor tests (M2)
 
@@ -107,6 +110,8 @@ The 5x run on 2026-11-10 (WSL, reference PC, `nice 10`) is in
 | 2026-11-09 | M1 stack check through Docker Desktop from Windows (`docker.exe compose`, a throwaway project, throwaway passwords in the shell, an empty test data folder, since removed): ClickHouse, Prometheus and Grafana all reached `healthy`; the 4 ClickHouse integration tests passed (user `tickdb` works, `default` refused, memory ratio 0.5); Prometheus target up; Grafana 13.2.5 healthy with `grafana-clickhouse-datasource` 4.23.4 installed and anonymous API access refused (401). Bind mounts through the `\\wsl.localhost` path need the containers' user set to root, so they are not representative: the real run is `make up` from Ubuntu once the integration is back. |
 | 2026-11-10 19:25 | **First cron mirror run** (deploy clone `4f3fe19`): started 19:25:01, 267 s, 263 files, 2.13 GB copied (11-10 hours 02 to 18), 365 already present, no errors. `tickdb mirror status`: every closed hour of 11-08 to 11-10 copied. Recorder ingest p99 (`scripts/recorder_impact.py`, run minutes against the 30 minutes before): median binance-usdm 215 vs 207 µs, coinbase 230 vs 266 µs, kraken 167 vs 162 µs; every maximum during the run lower than before it. **24 h soak of the mirror starts with this run** and ends after the 2026-11-11 19:25 run. |
 | 2026-11-11 07:00-19:38 | **Host crash.** WSL down about 12.6 h; the recorder restarted at 19:38:56 UTC and the mirror cron came back with it (no hour lost: the recorder was down too). The mirror's 24 h soak, 12 clean runs in (11-10 19:25 to 11-11 06:25), was cut by the host, not by a job error, and restarts with the 20:25 run; judged after the 2026-11-12 20:25 run. The interrupted 11-07 copy was finished at 19:49 (163 files, 0.95 GB, no errors). |
+| 2026-11-12 19:02 to 11-15 17:43 | **Second host outage, about 70.7 h** (WSL boot history). No raw exists for the shared capture in that span; the mirror's cron did not run (72 h hole in its log); the soak was cut again. |
+| 2026-11-17 | Project moved off the failing D: drive to `G:\trading-strategy-brainstorm\tick-data-platform` (`/mnt/g/...`); WSL runs from `G:\WSL\Ubuntu`, Docker's disk from `G:\Docker`. WSL down 18:17:46 to 18:58:01 UTC for the move. The mirror's guard path is `/mnt/g`. The stack was recreated from `/mnt/g` so its config mounts no longer point at D:. The deploy clone moved to `m3-archive` (the daily job had failed since 11-13 with "No such command 'scheduler'"). The copy-job soak restarts with the 20:25 run. |
 
 ## Tests that need local resources
 

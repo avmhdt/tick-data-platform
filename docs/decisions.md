@@ -58,6 +58,7 @@ the build. `DECISIONS.md` overrides the spec, and the spec overrides `README.md`
 | 2026-11-09 | Retention cuts (D-10, D-11) | Owner, quoted: "Approve the cuts (Recommended)". Raw spool copies are kept **7 days** (spec default 30), still deleted only after that day's verify and replay hash pass. ClickHouse `book_l2` TTL is **14 days** (spec default 90), reloadable from Parquet. Trades, BBO, bars, the Parquet archive, gaps and DQ results keep full retention. Recorded as deviations from the spec defaults. |
 | 2026-11-10 | Owner location | The owner is in Brazil, not the Cayman Islands, with no VPN or proxy. The M1 smoke test (2026-11-09) therefore ran from Brazil: all three venues reachable over websocket and REST, no geo-block, no auth. Nothing in this project's venue access depends on the declared country. |
 | 2026-11-11 | AC-W-01 window after the host crash | The whole PC crashed: WSL was down from about 07:00 to 19:37:54 UTC on 2026-11-11 (about 12.6 h on every stream), far over the 72 min a day allows, so the window 2026-11-08 to 12-07 cannot pass. It is published as a failed first window (finding: host crash on 11-11). Owner, quoted: "Move both to 11-12 (Recommended)". **The 30-day window is 2026-11-12 to 2026-12-11**; the shared recorder runs to at least 2026-12-12 02:00 UTC (crypto-lob-alpha's session records that), within the Windows Update pause to about 2026-12-15 (3 days of slack). Thresholds unchanged. The mirror's cron line becomes `--to 2026-12-11`, removed after 2026-12-13 (owner edits the crontab). |
+| 2026-11-17 | AC-W-01 window after the second host outage | WSL was down from 2026-11-12 19:02:42 to 11-15 17:43:45 UTC (about 70.7 h; boot history, shared raw archive and the mirror's run log agree), so the window 2026-11-12 to 12-11 failed on its first day; it is published as a failed window. A further 40 min outage on 11-17 (18:17:46 to 18:58:01 UTC) came with the move off the failing D: drive. Owner, quoted: "11-18 to 12-17 (Recommended)". **The 30-day window is 2026-11-18 to 2026-12-17**, in line with crypto-lob-alpha's window and leaving both allowed days below 99 % unused. The shared recorder runs to at least 2026-12-18 02:00 UTC (crypto-lob-alpha's session records that); the Windows Update hold is being extended to about 2026-12-22. Thresholds unchanged. The mirror's cron line becomes `--to 2026-12-17`, removed after 2026-12-19. |
 
 ## Spec decisions (section 3)
 
@@ -176,5 +177,6 @@ the build. `DECISIONS.md` overrides the spec, and the spec overrides `README.md`
     zstd frame decoding (`tickdb mirror verify`; a frame the recorder itself cut in a crash is
     reported, not counted as a failure), and the recorder's per-minute ingest p99 during
     mirror runs no worse than otherwise (`scripts/recorder_impact.py`).
-14. **Capture Day 1 is 2026-11-12** (owner ruling of 2026-11-11, after the host crash; the
-    first window, 2026-11-08 to 12-07, failed). The 30-day window is 2026-11-12 to 2026-12-11.
+14. **Capture Day 1 is 2026-11-18** (owner ruling of 2026-11-17). Earlier windows failed:
+    2026-11-08 to 12-07 (host crash, 11-11) and 2026-11-12 to 12-11 (70.7 h outage, 11-12 to
+    11-15). The 30-day window is 2026-11-18 to 2026-12-17.
