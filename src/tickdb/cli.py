@@ -617,6 +617,49 @@ def dq_summary(
     typer.echo(str(path))
 
 
+@dq_app.command("daily")
+def dq_daily(
+    date_: DateOpt,
+    venue: VenueOpt = None,
+    load: Annotated[
+        bool, typer.Option(help="Also load dq_daily/dq_outliers into ClickHouse.")
+    ] = True,
+    dest: DestOpt = None,
+    config: ConfigOpt = None,
+) -> None:
+    """DQ checks DQ-05 to DQ-10 for a compacted day: dq_daily, dq_outliers, hourly latency.
+
+    Exit 1 if any row's status is fail.
+
+    Example: tickdb dq daily --date 2026-11-17 --venue kraken
+    """
+    from datetime import date as _date
+
+    from tickdb.dq import daily
+
+    settings, cfg = _load(config)
+    root = dest or Path(cfg.data_root).expanduser()
+    day = _date.fromisoformat(date_)
+    lim = daily.Limits.from_config(cfg.dq)
+    shared = Path(cfg.capture.shared_root).expanduser()
+    writer = None
+    if load and settings.clickhouse_password is not None:
+        from tickdb.load import clickhouse as ch
+
+        writer = ch.connect_settings(settings)
+    failed = False
+    for name in _venue_list(cfg, venue):
+        symbols = tuple(cfg.venues[name].symbols)
+        result = daily.check_day(root, name, day, symbols, shared_root=shared, limits=lim)
+        daily.write_day(root, result)
+        loaded = daily.load_day(writer, root, name, day) if writer is not None else None
+        statuses = result.statuses
+        failed |= "fail" in statuses.values()
+        line = {"venue": name, "date": date_, "status": statuses}
+        typer.echo(json.dumps(line | {"outliers": result.outliers.num_rows, "loaded": loaded}))
+    raise typer.Exit(EXIT_FAIL if failed else EXIT_OK)
+
+
 @app.command("backfill")
 def backfill_cmd(
     date_: DateOpt,
@@ -795,12 +838,32 @@ def scheduler_run(
                     "replay", bool(rep["ok"]), f"partitions={len(rep['partitions'])}"
                 )
 
+            def dq(name: str = name, symbols: tuple[str, ...] = symbols) -> scheduler.StepResult:
+                from collections import Counter
+
+                from tickdb.dq import daily
+
+                result = daily.check_day(
+                    root, name, day, symbols,
+                    shared_root=Path(cfg.capture.shared_root).expanduser(),
+                    limits=daily.Limits.from_config(cfg.dq),
+                )  # fmt: skip
+                daily.write_day(root, result)
+                if settings.clickhouse_password is not None:
+                    from tickdb.load import clickhouse as ch
+
+                    daily.load_day(ch.connect_settings(settings), root, name, day)
+                counts = Counter(result.statuses.values())
+                # a fail is a verdict on the data, not a failed step: the day is still reported
+                return scheduler.StepResult("dq", True, json.dumps(dict(sorted(counts.items()))))
+
             actions: dict[str, Callable[..., scheduler.StepResult]] = {
                 "compact": compact,
                 "backfill": backfill,
                 "recompact": recompact,
                 "load": load,
                 "replay": replay,
+                "dq": dq,
             }
             results[name] = scheduler.daily_steps(name, day, actions, log)
         report.write_day(root, day, reports)

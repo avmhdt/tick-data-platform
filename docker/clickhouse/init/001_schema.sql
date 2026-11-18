@@ -150,7 +150,7 @@ CREATE TABLE IF NOT EXISTS tickdb.dq_daily
     symbol LowCardinality(String),
     dataset LowCardinality(String),
     rows Int64,
-    dup_rows_removed Int64,
+    dup_rows_removed Nullable(Int64),
     outliers Int64,
     crossed_bbo Int64,
     gap_count Int64,

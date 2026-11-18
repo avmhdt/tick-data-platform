@@ -190,6 +190,7 @@ class DQConfig(_Model):
     outlier: OutlierConfig = OutlierConfig()
     clock_offset_max_ms: float = 50.0
     coverage_warn_pct: float = 99.0
+    coverage_fail_pct: float = 95.0
 
 
 class RetentionConfig(_Model):

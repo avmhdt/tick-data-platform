@@ -1,6 +1,7 @@
 """Daily job (FR-31): for day D-1 after 01:30 UTC, per venue,
 compact -> backfill -> compact again if REST rows arrived -> load into ClickHouse (skipped,
-and logged as skipped, while ClickHouse is not configured) -> replay verify -> gap report;
+and logged as skipped, while ClickHouse is not configured) -> replay verify -> DQ checks
+(dq_daily, dq_outliers) -> gap report;
 then the rolling summary and retention.
 
 Each step is idempotent, holds a file lock (one daily job at a time), is retried 3 times
@@ -112,7 +113,7 @@ def daily_steps(
 ) -> list[StepResult]:
     """Run the venue's steps in order; stop at the first failure (later steps need it)."""
     done = []
-    for name in ("compact", "backfill", "recompact", "load", "replay", "report"):
+    for name in ("compact", "backfill", "recompact", "load", "replay", "dq", "report"):
         if name not in actions:
             continue
         result = run_step(name, actions[name], log=log, day=day, venue=venue, sleep=sleep)

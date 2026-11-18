@@ -148,7 +148,7 @@ DQ_DAILY = pa.schema(
         _f("symbol", pa.string()),
         _f("dataset", pa.string()),
         _f("rows", pa.int64()),
-        _f("dup_rows_removed", pa.int64()),
+        _f("dup_rows_removed", pa.int64(), nullable=True),  # null: not recorded per symbol
         _f("outliers", pa.int64()),
         _f("crossed_bbo", pa.int64()),
         _f("gap_count", pa.int64()),
