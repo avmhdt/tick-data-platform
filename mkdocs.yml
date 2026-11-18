@@ -13,5 +13,6 @@ nav:
   - Home: index.md
   - Quickstart: quickstart.md
   - Schemas: schemas.md
+  - Python client: client.md
   - Operations: operations.md
   - Decisions: decisions.md
