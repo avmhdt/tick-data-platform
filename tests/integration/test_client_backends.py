@@ -97,3 +97,21 @@ def test_sql_passthrough_with_parameters(backends: tuple[object, object]) -> Non
     )
     assert isinstance(out, pl.DataFrame)
     assert out["n"][0] == 3
+
+
+def test_verify_against_both_backends(
+    backends: tuple[object, object], tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    from tickdb import verify
+
+    clickhouse, parquet = backends
+    root = parquet.root  # type: ignore[attr-defined]
+    raw = root.parent / "raw"
+    for venue, symbol in VENUES.items():
+        checks = verify.verify_day(
+            [raw], root, venue, DAY, (symbol,),
+            clickhouse=clickhouse._clickhouse(), client_ch=clickhouse, client_pq=parquet,  # type: ignore[attr-defined]
+        )  # fmt: skip
+        result = verify.report(checks)
+        assert result["ok"], result
+        assert result["total"] == 6  # 2 vs Parquet, 2 vs ClickHouse, BBO samples, as-of
