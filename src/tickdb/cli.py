@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated, Any
@@ -433,3 +434,420 @@ def disk_project(
 
 if __name__ == "__main__":  # pragma: no cover
     app()
+
+
+# ---------------------------------------------------------------- compaction (M3)
+
+DateOpt = Annotated[str, typer.Option("--date", help="UTC date, YYYY-MM-DD.")]
+VenueOpt = Annotated[str | None, typer.Option("--venue", help="One venue; default all enabled.")]
+
+
+def _venue_list(cfg: TickdbConfig, venue: str | None) -> list[str]:
+    if venue is None:
+        return list(cfg.enabled_venues())
+    if venue not in cfg.venues:
+        typer.echo(f"unknown venue {venue!r}", err=True)
+        raise typer.Exit(EXIT_CONFIG)
+    return [venue]
+
+
+def _raw_root(data_root: Path, raw: Path | None) -> Path:
+    return raw or data_root / "raw" / "external" / "lob-alpha"
+
+
+@app.command("compact")
+def compact_cmd(
+    date_: DateOpt,
+    venue: VenueOpt = None,
+    dest: DestOpt = None,
+    raw: Annotated[Path | None, typer.Option(help="Raw root; default the shared mirror.")] = None,
+    config: ConfigOpt = None,
+) -> None:
+    """Spool -> Parquet for one UTC day (daily final partitions, manifests, gaps).
+
+    Example: tickdb compact --date 2026-11-09 --venue kraken
+    """
+    from datetime import date as _date
+
+    from tickdb.compact.compactor import compact_day
+
+    _, cfg = _load(config)
+    root = dest or Path(cfg.data_root).expanduser()
+    day = _date.fromisoformat(date_)
+    for name in _venue_list(cfg, venue):
+        vcfg = cfg.venues[name]
+        result = compact_day(
+            _raw_root(root, raw), root, name, day, tuple(vcfg.symbols),
+            kraken_depth=vcfg.book.depth or 1000,
+        )  # fmt: skip
+        typer.echo(
+            json.dumps(
+                {
+                    "venue": name,
+                    "date": date_,
+                    "seconds": result.seconds,
+                    "gaps": result.gaps,
+                    "rows": {k: v["rows"] for k, v in result.partitions.items()},
+                    "counters": result.counters,
+                }
+            )
+        )
+
+
+@app.command("replay")
+def replay_cmd(
+    date_: DateOpt,
+    verify: Annotated[bool, typer.Option("--verify/--no-verify", help="Compare hashes.")] = True,
+    keep_scratch: Annotated[bool, typer.Option(help="Keep the rebuilt partitions.")] = False,
+    venue: VenueOpt = None,
+    dest: DestOpt = None,
+    raw: Annotated[Path | None, typer.Option(help="Raw root; default the shared mirror.")] = None,
+    config: ConfigOpt = None,
+) -> None:
+    """Rebuild a day from the raw spool into scratch and compare content hashes (FR-10).
+
+    Exit 2 if any partition differs from the archive.
+
+    Example: tickdb replay --date 2026-11-09 --verify
+    """
+    from datetime import date as _date
+
+    from tickdb.compact.compactor import replay_verify
+
+    _, cfg = _load(config)
+    root = dest or Path(cfg.data_root).expanduser()
+    day = _date.fromisoformat(date_)
+    ok = True
+    for name in _venue_list(cfg, venue):
+        vcfg = cfg.venues[name]
+        report = replay_verify(
+            _raw_root(root, raw), root, name, day, tuple(vcfg.symbols),
+            keep_scratch=keep_scratch, kraken_depth=vcfg.book.depth or 1000,
+        )  # fmt: skip
+        from tickdb.retention import record_verify
+
+        record_verify(root, name, day, report)
+        typer.echo(json.dumps(report))
+        ok &= report["ok"]
+    raise typer.Exit(EXIT_OK if ok or not verify else EXIT_MISMATCH)
+
+
+@app.command("load")
+def load_cmd(
+    date_: DateOpt,
+    venue: VenueOpt = None,
+    dest: DestOpt = None,
+    config: ConfigOpt = None,
+) -> None:
+    """Parquet -> ClickHouse for one UTC day via REPLACE PARTITION, with a post-load check.
+
+    Exit 2 if a ClickHouse fingerprint differs from the Parquet files.
+
+    Example: tickdb load --date 2026-11-12
+    """
+    from datetime import date as _date
+
+    from tickdb.load import clickhouse as ch
+
+    settings, cfg = _load(config)
+    if settings.clickhouse_password is None:
+        typer.echo("CLICKHOUSE_PASSWORD is not set in .env (P-06)", err=True)
+        raise typer.Exit(EXIT_CONFIG)
+    root = dest or Path(cfg.data_root).expanduser()
+    client = ch.connect_settings(settings)
+    ch.apply_schema(client)
+    ok = True
+    for name in _venue_list(cfg, venue):
+        report = ch.load_venue_day(
+            client, root, name, _date.fromisoformat(date_), tuple(cfg.venues[name].symbols)
+        )
+        rows = {t: v["rows"] for t, v in report.tables.items()}
+        typer.echo(json.dumps({"venue": name, "date": date_, "ok": report.ok, "rows": rows}))
+        ok &= report.ok
+    raise typer.Exit(EXIT_OK if ok else EXIT_MISMATCH)
+
+
+dq_app = typer.Typer(help="Data-quality reports.")
+app.add_typer(dq_app, name="dq")
+
+
+@dq_app.command("report")
+def dq_report(
+    date_: DateOpt,
+    out: Annotated[Path, typer.Option(help="Report folder.")] = Path("reports/dq"),
+    dest: DestOpt = None,
+    config: ConfigOpt = None,
+) -> None:
+    """Daily gap report: reports/dq/YYYY-MM-DD.{md,csv,json} (aggregates only).
+
+    Example: tickdb dq report --date 2026-11-12
+    """
+    from datetime import date as _date
+
+    from tickdb.dq import report
+
+    _, cfg = _load(config)
+    root = dest or Path(cfg.data_root).expanduser()
+    summary = report.write_day(root, _date.fromisoformat(date_), out)
+    typer.echo(json.dumps(summary))
+
+
+@dq_app.command("summary")
+def dq_summary(
+    from_: FromOpt,
+    to: Annotated[str, typer.Option("--to", help="Last UTC date (inclusive).")],
+    out: Annotated[Path, typer.Option(help="Report folder.")] = Path("reports/dq"),
+) -> None:
+    """Rolling summary reports/dq/summary.md from the daily reports.
+
+    Example: tickdb dq summary --from 2026-11-12 --to 2026-12-11
+    """
+    from datetime import date as _date
+
+    from tickdb.dq import report
+
+    path = report.write_summary(out, _date.fromisoformat(from_), _date.fromisoformat(to))
+    typer.echo(str(path))
+
+
+@app.command("backfill")
+def backfill_cmd(
+    date_: DateOpt,
+    venue: VenueOpt = None,
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="Only list what is missing.")] = False,
+    dest: DestOpt = None,
+    config: ConfigOpt = None,
+) -> None:
+    """REST backfill of the open trade gaps of a compacted day (FR-05); then re-run compact.
+
+    Example: tickdb backfill --date 2026-11-12 --venue kraken
+    """
+    from datetime import date as _date
+
+    from tickdb.ingest import backfill as bf
+
+    _, cfg = _load(config)
+    root = dest or Path(cfg.data_root).expanduser()
+    day = _date.fromisoformat(date_)
+    for name in _venue_list(cfg, venue):
+        needs = bf.plan(root, name, day)
+        report = {
+            "venue": name,
+            "gaps": len(needs),
+            "missing_ids": sum(n.hi - n.lo + 1 for n in needs),
+        }
+        if dry_run or not needs:
+            typer.echo(json.dumps(report))
+            continue
+        received, requests, spool = asyncio.run(_backfill(bf, name, cfg, needs, root, day))
+        report |= {"received": received, "requests": requests, "spool": spool}
+        typer.echo(json.dumps(report))
+
+
+async def _backfill(
+    bf: Any, name: str, cfg: TickdbConfig, needs: list[Any], root: Path, day: Any
+) -> tuple[int, int, str]:
+    from datetime import timedelta
+
+    filler = bf.Backfiller(name, cfg.venues[name].rest_url)
+    received = 0
+    for need in needs:
+        got = await filler.fetch(need)
+        if got < need.hi - need.lo + 1 and name == "binance-usdm":
+            got = max(got, filler.vision(need, root, [day - timedelta(days=1), day]))
+        received += got
+    await filler.http.aclose()
+    for error in filler.errors:
+        typer.echo(f"backfill note: {error}", err=True)
+    return received, filler.requests, str(filler.write(root, day))
+
+
+retention_app = typer.Typer(help="Retention (raw kept 7 days after verification, D-10).")
+scheduler_app = typer.Typer(help="Daily job.")
+app.add_typer(retention_app, name="retention")
+app.add_typer(scheduler_app, name="scheduler")
+
+
+@retention_app.command("apply")
+def retention_apply(
+    dry_run: Annotated[bool, typer.Option("--dry-run", help="List only.")] = False,
+    dest: DestOpt = None,
+    config: ConfigOpt = None,
+) -> None:
+    """Delete raw venue-days past retention whose replay check passed (never others).
+
+    Example: tickdb retention apply --dry-run
+    """
+    from tickdb import retention
+
+    _, cfg = _load(config)
+    root = dest or Path(cfg.data_root).expanduser()
+    plan = retention.apply(root, cfg.retention.raw_spool_days, dry_run=dry_run)
+    report = {
+        "dry_run": dry_run,
+        "delete": [str(p.relative_to(root)) for p in plan.delete],
+        "bytes": plan.bytes,
+        "kept_unverified": plan.keep_unverified,
+    }
+    typer.echo(json.dumps(report))
+
+
+@scheduler_app.command("run")
+def scheduler_run(
+    once: Annotated[str, typer.Option(help="Job to run once: daily.")] = "daily",
+    date_: Annotated[str | None, typer.Option("--date", help="Day; default yesterday UTC.")] = None,
+    reports: Annotated[
+        Path | None, typer.Option(help="Gap report folder; default <data root>/reports/dq.")
+    ] = None,
+    config: ConfigOpt = None,
+) -> None:
+    """Run the daily job for D-1 (compact, backfill, load, replay, report, retention).
+
+    Runs from the ext4 deploy clone; logs and reports go under the data root, and the
+    aggregates are copied into the repo's reports/dq/ for publishing.
+
+    Example: tickdb scheduler run --once daily
+    """
+    from datetime import date as _date
+    from datetime import timedelta
+
+    from tickdb import retention, scheduler
+    from tickdb.compact.compactor import compact_day, replay_verify
+    from tickdb.dq import report
+    from tickdb.ingest import backfill as bf
+
+    if once != "daily":
+        typer.echo("only the daily job runs here; the hourly step is the mirror's cron", err=True)
+        raise typer.Exit(EXIT_CONFIG)
+    settings, cfg = _load(config)
+    root = Path(cfg.data_root).expanduser()
+    raw = root / "raw" / "external" / "lob-alpha"
+    day = _date.fromisoformat(date_) if date_ else datetime.now(UTC).date() - timedelta(days=1)
+    log = root / "meta" / "scheduler" / "job_log.csv"
+    reports = reports or root / "reports" / "dq"
+    results = {}
+    with scheduler.job_lock(root / "meta" / "scheduler" / ".lock") as locked:
+        if not locked:
+            typer.echo("another daily job holds the lock")
+            raise typer.Exit(EXIT_OK)
+        for name in cfg.enabled_venues():
+            vcfg = cfg.venues[name]
+            symbols = tuple(vcfg.symbols)
+            depth = vcfg.book.depth or 1000
+            fetched = {"rows": 0}
+
+            def compact(
+                name: str = name, symbols: tuple[str, ...] = symbols, depth: int = depth
+            ) -> scheduler.StepResult:
+                r = compact_day(raw, root, name, day, symbols, kraken_depth=depth)
+                return scheduler.StepResult(
+                    "compact", bool(r.partitions), f"{r.seconds}s gaps={r.gaps}"
+                )
+
+            def backfill(
+                name: str = name, fetched: dict[str, int] = fetched
+            ) -> scheduler.StepResult:
+                needs = bf.plan(root, name, day)
+                if not needs:
+                    return scheduler.StepResult("backfill", True, "no open trade gaps")
+                got, requests, _ = asyncio.run(_backfill(bf, name, cfg, needs, root, day))
+                fetched["rows"] = got
+                return scheduler.StepResult("backfill", True, f"received={got} requests={requests}")
+
+            def recompact(
+                name: str = name,
+                symbols: tuple[str, ...] = symbols,
+                depth: int = depth,
+                fetched: dict[str, int] = fetched,
+            ) -> scheduler.StepResult:
+                if not fetched["rows"]:
+                    return scheduler.StepResult("recompact", True, "nothing fetched", skipped=True)
+                r = compact_day(raw, root, name, day, symbols, kraken_depth=depth)
+                return scheduler.StepResult("recompact", True, f"{r.seconds}s gaps={r.gaps}")
+
+            def load(name: str = name, symbols: tuple[str, ...] = symbols) -> scheduler.StepResult:
+                if settings.clickhouse_password is None:
+                    return scheduler.StepResult(
+                        "load", False, "ClickHouse not configured", skipped=True
+                    )
+                from tickdb.load import clickhouse as ch
+
+                client = ch.connect_settings(settings)
+                ch.apply_schema(client)
+                rep = ch.load_venue_day(client, root, name, day, symbols)
+                return scheduler.StepResult(
+                    "load", rep.ok, json.dumps({t: v["rows"] for t, v in rep.tables.items()})
+                )
+
+            def replay(
+                name: str = name, symbols: tuple[str, ...] = symbols, depth: int = depth
+            ) -> scheduler.StepResult:
+                rep = replay_verify(raw, root, name, day, symbols, kraken_depth=depth)
+                retention.record_verify(root, name, day, rep)
+                return scheduler.StepResult(
+                    "replay", bool(rep["ok"]), f"partitions={len(rep['partitions'])}"
+                )
+
+            actions: dict[str, Callable[..., scheduler.StepResult]] = {
+                "compact": compact,
+                "backfill": backfill,
+                "recompact": recompact,
+                "load": load,
+                "replay": replay,
+            }
+            results[name] = scheduler.daily_steps(name, day, actions, log)
+        report.write_day(root, day, reports)
+        report.write_summary(reports, _date(2026, 11, 12), day)
+        retention.apply(root, cfg.retention.raw_spool_days, dry_run=False)
+    typer.echo(scheduler.status_line(results))
+
+
+@dq_app.command("book-checks")
+def dq_book_checks(
+    from_: FromOpt,
+    to: Annotated[str, typer.Option("--to", help="Last UTC date (inclusive).")],
+    dest: DestOpt = None,
+    config: ConfigOpt = None,
+) -> None:
+    """AC-W-05 evidence: checksums, checkpoint matches, crossed BBO, resync times.
+
+    Example: tickdb dq book-checks --from 2026-11-12 --to 2026-11-14
+    """
+    from datetime import date as _date
+
+    from tickdb.dq import report
+
+    _, cfg = _load(config)
+    root = dest or Path(cfg.data_root).expanduser()
+    checks = report.book_checks(root, _date.fromisoformat(from_), _date.fromisoformat(to))
+    typer.echo(json.dumps(checks, indent=2))
+
+
+@dq_app.command("checkpoints")
+def dq_checkpoints(
+    date_: DateOpt,
+    dest: DestOpt = None,
+    raw: Annotated[Path | None, typer.Option(help="Raw root; default the shared mirror.")] = None,
+    config: ConfigOpt = None,
+) -> None:
+    """Coinbase REST checkpoints vs the rebuilt book, aligned by sequence (AC-W-05).
+
+    Example: tickdb dq checkpoints --date 2026-11-12
+    """
+    from datetime import date as _date
+
+    import orjson as _orjson
+
+    from tickdb.dq import checkpoints as ck
+
+    _, cfg = _load(config)
+    root = dest or Path(cfg.data_root).expanduser()
+    day = _date.fromisoformat(date_)
+    roots = [_raw_root(root, raw), root / "raw" / "backfill"]
+    result = ck.check_day(
+        roots, ck.carry_for(root, day), day, tuple(cfg.venues["coinbase"].symbols)
+    )
+    path = root / "meta" / "checkpoints" / "venue=coinbase" / f"date={date_}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(_orjson.dumps(result, option=_orjson.OPT_INDENT_2))
+    typer.echo(json.dumps(result))

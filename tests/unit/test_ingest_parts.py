@@ -175,3 +175,19 @@ def test_disk_project_command(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     assert "raw mirror (shared)" in result.output
     assert "free now" in result.output
+
+
+def test_schema_sql_parses_into_statements() -> None:
+    from tickdb.load import clickhouse as ch
+
+    statements = ch.schema_statements()
+    assert statements[0].startswith("CREATE DATABASE")
+    tables = [s.split()[5] for s in statements if s.startswith("CREATE TABLE")]
+    assert {
+        "tickdb.trades",
+        "tickdb.book_l2",
+        "tickdb.bbo",
+        "tickdb.bars_1s",
+        "tickdb.gaps",
+    } <= set(tables)
+    assert ch.schema_statements("-- note\nSELECT 1; ;\n") == ["SELECT 1"]

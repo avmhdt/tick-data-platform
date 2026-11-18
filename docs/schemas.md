@@ -25,5 +25,8 @@ Key rules:
   `ts_exchange` (DQ-02).
 - **Replay order:** stable sort by `ts_recv`, then `batch_id` and `level_idx` (book) or
   `seq`/`trade_id` (trades, bbo), then original row order (DQ-01).
+- **Kraken depth:** the book is subscribed at depth 1000 (D-06) and Kraken sends no delete
+  for a level that leaves that scope. To rebuild a Kraken book from `book_l2`, keep only the
+  best 1,000 levels per side after each batch, as Kraken does; otherwise stale levels survive.
 - **Side:** trades `+1` buyer-initiated, `-1` seller-initiated, `0` unknown; book `+1` bid,
   `-1` ask.

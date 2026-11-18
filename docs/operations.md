@@ -101,6 +101,31 @@ The 5x run on 2026-11-10 (WSL, reference PC, `nice 10`) is in
 | kraken (depth 1000) | 7,795 | 7,803 | 156,065 = 156,065 | 1.16 ms | 100 % |
 | coinbase (5,000-level book) | 1,770 | 1,774 | 35,488 = 35,488 | 1.15 ms | 99.992 % |
 
+## Daily job (M3)
+
+`tickdb scheduler run --once daily` compacts yesterday (UTC) per venue, runs REST backfill of
+trade gaps (with the data.binance.vision fallback), re-compacts if rows arrived, loads
+ClickHouse (skipped while it isn't configured), checks the replay hash, writes the gap report
+and summary, and applies retention. It runs from the ext4 deploy clone
+`~/tick-data-platform-deploy` (like the mirror), never from `/mnt/d`, whose drvfs mount breaks
+on a Windows sign-out and whose branch changes during development. Logs go to
+`~/data/tick-data-platform/meta/scheduler/` (`job_log.csv` per step, `cron.log`) and reports to
+`~/data/tick-data-platform/reports/dq/`; the aggregates are copied into the repo's
+`reports/dq/` when published. Without a `.env` in the deploy clone the data root is
+`~/data/tick-data-platform` and the load step is skipped; once the ClickHouse password exists,
+copy `.env` into the deploy clone (`chmod 600`).
+
+Cron line for the owner (WSL crontab of `ze`; 01:40 UTC, after the first hour of the next day
+has closed and been mirrored):
+
+```cron
+# tdp-daily: tick-data-platform daily job (compaction, backfill, replay, gap reports, retention). Runs from the ext4 deploy clone.
+40 1 * * * mkdir -p /home/ze/data/tick-data-platform/meta/scheduler && cd /home/ze/tick-data-platform-deploy && nice -n 10 ionice -c3 /home/ze/.local/bin/uv run --no-sync tickdb scheduler run --once daily >> /home/ze/data/tick-data-platform/meta/scheduler/cron.log 2>&1 # tdp-daily
+```
+
+The deploy clone tracks the branch that holds the scheduler (`m3-archive` until M3 merges,
+then `main`); it is updated only between runs, with `git pull` and `uv sync --locked`.
+
 ## Incidents and owner steps
 
 | Date (UTC) | Event |
@@ -112,6 +137,7 @@ The 5x run on 2026-11-10 (WSL, reference PC, `nice 10`) is in
 | 2026-11-11 07:00-19:38 | **Host crash.** WSL down about 12.6 h; the recorder restarted at 19:38:56 UTC and the mirror cron came back with it (no hour lost: the recorder was down too). The mirror's 24 h soak, 12 clean runs in (11-10 19:25 to 11-11 06:25), was cut by the host, not by a job error, and restarts with the 20:25 run; judged after the 2026-11-12 20:25 run. The interrupted 11-07 copy was finished at 19:49 (163 files, 0.95 GB, no errors). |
 | 2026-11-12 19:02 to 11-15 17:43 | **Second host outage, about 70.7 h** (WSL boot history). No raw exists for the shared capture in that span; the mirror's cron did not run (72 h hole in its log); the soak was cut again. |
 | 2026-11-17 | Project moved off the failing D: drive to `G:\trading-strategy-brainstorm\tick-data-platform` (`/mnt/g/...`); WSL runs from `G:\WSL\Ubuntu`, Docker's disk from `G:\Docker`. WSL down 18:17:46 to 18:58:01 UTC for the move. The mirror's guard path is `/mnt/g`. The stack was recreated from `/mnt/g` so its config mounts no longer point at D:. The deploy clone moved to `m3-archive` (the daily job had failed since 11-13 with "No such command 'scheduler'"). The copy-job soak restarts with the 20:25 run. |
+| 2026-11-17 | **ClickHouse loaded for 2026-11-07 to 11-11** (AC-W-03): first pass 14 of 15 venue-days matched; Kraken 11-11 SOL/USD trades were 265 rows short in ClickHouse. Cause: REST backfill pages held trades outside the requested id range from the previous day, which sat in the day's Parquet partition but ClickHouse dates by `ts_recv`. Fixed (only missing ids that fall on the day are kept, DQ-02); the affected venue-days were re-compacted and replayed (all identical), and all 15 venue-days then loaded with row counts and fingerprints equal to Parquet. |
 | 2026-11-18 20:39 | **Mirror soak passed** (2026-11-17 20:25 to 11-18 20:25 UTC, deploy clone at `m3-archive`): 25 hourly runs, 0 with errors or a stop, at most 1.0 h apart, each at most 31.4 s; 282 files (3.6 GB) copied; `tickdb mirror status` shows every closed hour of 11-17 and 11-18 copied; `tickdb mirror verify` re-hashed all 437 files of those days, 0 mismatches (118 files end without a zstd frame footer: the recorder's own still-open or dead-connection files, reported not failed). Recorder ingest p99 during mirror runs vs the 30 minutes before (109 runs): median binance-usdm 203.8 vs 198.1 µs, coinbase 274.0 vs 276.9, kraken 184.9 vs 183.7; every maximum during runs lower than before. |
 
 ## Tests that need local resources

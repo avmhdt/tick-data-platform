@@ -1,0 +1,16 @@
+gap_id,venue,symbol,channel,kind,start_recv,end_recv,start_exchange,end_exchange,seq_from,seq_to,recovery,status,recovered_rows,duration_s
+4a4ec73b5b1c6ebcb4d26dc067c16587,binance-usdm,BTCUSDT,book_l2,disconnect,1794174471153908226,1794174476022518377,,,,,snapshot,partial,0,4.869
+e6dcab86dd69f431b9fd6b7e5f52ad61,binance-usdm,ETHUSDT,book_l2,disconnect,1794174471154288498,1794174475853948732,,,,,snapshot,partial,0,4.7
+fc455a0b6d945fcf1bb8eebf0226ed4d,binance-usdm,SOLUSDT,book_l2,disconnect,1794174471154201000,1794174475837005265,,,,,snapshot,partial,0,4.683
+098700e840c031d3277e19f63453150e,kraken,BTC/USD,book_l2,disconnect,1794166014791095587,1794166017106022256,,,,,snapshot,partial,0,2.315
+6301da72f3134401d1eb8a96f4d43c8e,kraken,BTC/USD,book_l2,disconnect,1794181212419285936,1794181215077897603,,,,,snapshot,partial,0,2.659
+2bfeb421472aae3701c967783b2f121d,kraken,BTC/USD,trades,disconnect,1794166009890016372,1794166020304091684,,,,,none,recovered,0,10.414
+feec179552dde7cec6a9a84488145b62,kraken,BTC/USD,trades,disconnect,1794181208895580115,1794181215254808641,,,114822818,114822818,rest_backfill,recovered,1,6.359
+e6cfd577ec42c491df5b7488aaa6d469,kraken,ETH/USD,book_l2,disconnect,1794166014487499442,1794166017091849668,,,,,snapshot,partial,0,2.604
+7b4e3566278488e01755d0ce70c6e62e,kraken,ETH/USD,book_l2,disconnect,1794181212284973557,1794181215024609910,,,,,snapshot,partial,0,2.74
+d2212cac814ab8158f9310d25cbc1693,kraken,ETH/USD,trades,disconnect,1794166007929053613,1794166017901761441,,,,,none,recovered,0,9.973
+96a0b212053192095bf7d7c5bbd9e0f6,kraken,ETH/USD,trades,disconnect,1794181205874435453,1794181223369820383,,,68910693,68910693,rest_backfill,recovered,1,17.495
+373dff2de351b8ccc68f061d3f81abb0,kraken,SOL/USD,book_l2,disconnect,1794166014795898619,1794166017118409917,,,,,snapshot,partial,0,2.323
+5591f55d25451d1e70e98ae95ca4bbfa,kraken,SOL/USD,book_l2,disconnect,1794181212414717452,1794181215128135904,,,,,snapshot,partial,0,2.713
+b199de8c0c05c0bd21fb377d62f3ce6e,kraken,SOL/USD,trades,disconnect,1794166007395232750,1794166019635477954,,,,,none,recovered,0,12.24
+edc732ac9c1c509d7dc60f74e17b10e1,kraken,SOL/USD,trades,disconnect,1794181210898750752,1794181217819687440,,,,,none,recovered,0,6.921

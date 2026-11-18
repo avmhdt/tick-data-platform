@@ -214,9 +214,14 @@ def mirror(
     excludes = excludes or {}
     result = MirrorResult()
     limiter = limiter or RateLimiter(rate_bytes_per_s)
+    from tickdb.retention import retired
+
     for src in scan(source, from_day, to_day):
         if src.group.startswith(excludes.get(src.venue, ())):
             result.skipped_excluded += 1
+            continue
+        if retired(dest, src.venue, src.day):  # deleted by retention: never copy it again
+            result.skipped_existing += 1
             continue
         if now() < src.hour_end + timedelta(seconds=grace_s):
             result.skipped_open += 1

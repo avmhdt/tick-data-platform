@@ -84,4 +84,4 @@ services:
       interval: 10s
       timeout: 5s
       retries: 18
-      start_period: 30s
+      start_period: 600s  # first start runs hundreds of SQLite migrations on the HDD

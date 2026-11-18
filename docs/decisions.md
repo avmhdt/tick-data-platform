@@ -58,6 +58,10 @@ the build. `DECISIONS.md` overrides the spec, and the spec overrides `README.md`
 | 2026-11-09 | Retention cuts (D-10, D-11) | Owner, quoted: "Approve the cuts (Recommended)". Raw spool copies are kept **7 days** (spec default 30), still deleted only after that day's verify and replay hash pass. ClickHouse `book_l2` TTL is **14 days** (spec default 90), reloadable from Parquet. Trades, BBO, bars, the Parquet archive, gaps and DQ results keep full retention. Recorded as deviations from the spec defaults. |
 | 2026-11-10 | Owner location | The owner is in Brazil, not the Cayman Islands, with no VPN or proxy. The M1 smoke test (2026-11-09) therefore ran from Brazil: all three venues reachable over websocket and REST, no geo-block, no auth. Nothing in this project's venue access depends on the declared country. |
 | 2026-11-11 | AC-W-01 window after the host crash | The whole PC crashed: WSL was down from about 07:00 to 19:37:54 UTC on 2026-11-11 (about 12.6 h on every stream), far over the 72 min a day allows, so the window 2026-11-08 to 12-07 cannot pass. It is published as a failed first window (finding: host crash on 11-11). Owner, quoted: "Move both to 11-12 (Recommended)". **The 30-day window is 2026-11-12 to 2026-12-11**; the shared recorder runs to at least 2026-12-12 02:00 UTC (crypto-lob-alpha's session records that), within the Windows Update pause to about 2026-12-15 (3 days of slack). Thresholds unchanged. The mirror's cron line becomes `--to 2026-12-11`, removed after 2026-12-13 (owner edits the crontab). |
+| 2026-11-12 | AC-W-05 Coinbase checkpoints | Owner, quoted: "Documented miss at ±1 s (Recommended)". The check is sequence-aligned (REST `sequence` matched to the heartbeat channel's per-product sequence) at ±1 s, the precision the data supports, because the REST book is about 1 s stale (median 0.99 s, 90th percentile 2.1 s) and the spec's receive-time comparison matches 0 %. 98.6 % on 2026-11-07 to 11-11 is published as a miss with that explanation. Threshold (≥ 99 %) unchanged; ±1.5 s is not used, because it was chosen after seeing the results. |
+| 2026-11-12 | AC-W-05 crossed BBO, Kraken | Owner, quoted: "Publish as a venue finding (Recommended)". DQ-05 still means zero crossed rows from this project's own processing. Crosses that the venue published, confirmed because every checksum over the crossed book matched, are flagged separately in the data-quality output, published as a finding (2,117 rows on Kraken BTC/USD, 2026-11-08 19:15:39 to 19:26:54 UTC) and listed as a documented exception. |
+| 2026-11-12 | AC-W-05 median resync, Binance | Owner, quoted: "Documented exception (Recommended)". The miss follows from the one-shared-capture decision: the measured time (median 27.6 s on 2026-11-07 to 11-11) is the shared recorder's, from its last good message to the validating snapshot after its reconnects. It is published next to this project's ingestor's tested figure (mock venues), each labelled. Threshold (≤ 10 s) unchanged. |
+| 2026-11-12 | **Correction to the Kraken crossed-BBO finding** | The 2,117 crossed rows on Kraken BTC/USD, 2026-11-08, were **this project's processing, not the venue's**. Kraken sends no delete for a level that leaves the subscribed 1,000-level scope; the normalizer truncated its book like Kraken, but the BBO replay did not, so a 74,062.4 bid that was cancelled while out of scope stayed in the BBO book and crossed it later. The venue-confirmed check added for the ruling found 0 crossed books behind a matching checksum, which exposed it. Fixed: the BBO replay truncates to the subscribed depth after every batch, as the venue does (D-06), and Kraken is re-derived. The owner's ruling stays as the rule for any future venue-confirmed cross; there is no such cross to publish for 11-08. |
 | 2026-11-17 | AC-W-01 window after the second host outage | WSL was down from 2026-11-12 19:02:42 to 11-15 17:43:45 UTC (about 70.7 h; boot history, shared raw archive and the mirror's run log agree), so the window 2026-11-12 to 12-11 failed on its first day; it is published as a failed window. A further 40 min outage on 11-17 (18:17:46 to 18:58:01 UTC) came with the move off the failing D: drive. Owner, quoted: "11-18 to 12-17 (Recommended)". **The 30-day window is 2026-11-18 to 2026-12-17**, in line with crypto-lob-alpha's window and leaving both allowed days below 99 % unused. The shared recorder runs to at least 2026-12-18 02:00 UTC (crypto-lob-alpha's session records that); the Windows Update hold is being extended to about 2026-12-22. Thresholds unchanged. The mirror's cron line becomes `--to 2026-12-17`, removed after 2026-12-19. |
 
 ## Spec decisions (section 3)
@@ -180,3 +184,52 @@ the build. `DECISIONS.md` overrides the spec, and the spec overrides `README.md`
 14. **Capture Day 1 is 2026-11-18** (owner ruling of 2026-11-17). Earlier windows failed:
     2026-11-08 to 12-07 (host crash, 11-11) and 2026-11-12 to 12-11 (70.7 h outage, 11-12 to
     11-15). The 30-day window is 2026-11-18 to 2026-12-17.
+
+### M3 (2026-11-11)
+
+1. **Normalizers read the shared capture's raw format directly** (`tickdb.normalize.rawlog`):
+   `ts\tpayload` frames per connection and `ts\t!<json>\t<body>` control records, merged per
+   hour by `(ts_recv, connection, line)`. Connection events (`conn_open` with `standby`,
+   `promote`, `conn_close`), REST bodies (`snapshot`, `checkpoint`) and the hourly `state`
+   record drive the replay, so the day's archive is a pure function of its raw files.
+2. **Binance snapshot bridging is stamped at the time the book became known.** The diff that
+   straddles a snapshot's `lastUpdateId` can arrive before or after it. Diffs that end before
+   the snapshot keep their own receive times; the snapshot batch and the diffs from the
+   straddling one on are stamped with the moment both were in hand. The archive stays in
+   receive-time order and replays to the correct book; original receive times stay in raw.
+3. **Days start from the recorder's state or the previous day's book.** Kraken's `state`
+   record carries levels (written as a snapshot batch with `conn_id = "state"`). Coinbase's
+   and Binance's don't, so each compaction saves the end-of-day book (`meta/book_end/`) and the
+   next day starts from it (`conn_id = "carry"`) when the same connection (Coinbase) or the
+   same `u` chain (Binance) continued across midnight. Otherwise the book is unknown until a
+   websocket snapshot or, for Binance, the day's first REST checkpoint.
+4. **Updates of an in-sync stream are always archived**, even while this replay doesn't know
+   the book's levels; derived BBO is flagged `in_resync` until it does. Nothing the venue sent
+   on the active connection is dropped.
+5. **Book gaps end only with a snapshot** and are then `partial` (book restored, L2 history
+   lost on free sources). A Kraken checksum mismatch keeps archiving the stream, opens a
+   `checksum` gap from the last message that checked out and waits for the resubscribe
+   snapshot.
+6. **Trade ids are contiguous on all three venues** (DQ-06, checked on 2026-11-08: no holes
+   outside disconnects). Trade gaps get their missing id range and are classified after REST
+   backfill: `recovered`, `partial`, `unrecoverable`, or `open` until a backfill is tried.
+   Trades are sorted into archive order at the end of the day, since REST rows carry
+   `ts_recv = ts_exchange` (DQ-07).
+7. **Content hash (FR-10):** SHA-256 of the Arrow IPC stream of the partition in archive
+   order, re-chunked into 65,536-row batches with the dataset's schema, so it doesn't depend
+   on how rows were batched.
+8. **ClickHouse tables are partitioned by `(date, venue)`**, the unit of compaction, so
+   `REPLACE PARTITION` swaps one venue-day without touching the others. The post-load check
+   compares row count and the wrap-around sum of the time column (exact integers) per symbol.
+9. **Checkpoint comparisons (DQ-04):** Binance is compared once the stream reaches
+   `lastUpdateId`, excluding levels touched by the straddling diff and by later diffs already
+   applied (a replay cannot rewind the book); Coinbase at the response time, top 20 levels,
+   excluding levels updated within ±500 ms.
+10. **Bars of day D read trades of D and D+1** (trades are partitioned by receive time, bars by
+    their `ts`), so bars of D are final once D+1 is compacted; the daily job recomputes them.
+11. **The hourly job is the mirror's cron entry.** Intraday interim parts and same-day
+    ClickHouse inserts are left to M4, where the client needs them.
+12. **Retention** deletes a raw venue-day only past 7 days and with a passing replay record in
+    `meta/verify/`; it leaves a tombstone so the mirror never copies the day again.
+13. **The daily job runs under cron in WSL** until Docker's WSL integration is back (then the
+    compose `scheduler` service). The cron line is in `docs/operations.md`; the owner adds it.
