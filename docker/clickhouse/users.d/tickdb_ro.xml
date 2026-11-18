@@ -1,0 +1,22 @@
+<clickhouse>
+    <!-- Read-only user for the client and Grafana (FR-15, NFR-08). readonly=2 allows
+         per-query settings such as join_use_nulls but no writes; the grant limits it to tickdb. -->
+    <profiles>
+        <tickdb_readonly>
+            <readonly>2</readonly>
+            <max_memory_usage>8000000000</max_memory_usage>
+            <max_threads>8</max_threads>
+        </tickdb_readonly>
+    </profiles>
+    <users>
+        <tickdb_ro>
+            <password from_env="CLICKHOUSE_READONLY_PASSWORD"/>
+            <profile>tickdb_readonly</profile>
+            <networks><ip>::/0</ip></networks>
+            <quota>default</quota>
+            <grants>
+                <query>GRANT SELECT ON tickdb.*</query>
+            </grants>
+        </tickdb_ro>
+    </users>
+</clickhouse>

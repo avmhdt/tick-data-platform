@@ -13,7 +13,10 @@ from tickdb.load import clickhouse as ch
 
 pytestmark = [
     pytest.mark.integration,
-    pytest.mark.skipif(not os.environ.get("CLICKHOUSE_PASSWORD"), reason="no ClickHouse"),
+    pytest.mark.skipif(
+        os.environ.get("TICKDB_TEST_CLICKHOUSE") != "1",
+        reason="writes fixture days into ClickHouse: throwaway server only (CI sets TICKDB_TEST_CLICKHOUSE=1)",
+    ),
 ]
 
 
