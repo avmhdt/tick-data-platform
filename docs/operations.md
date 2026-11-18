@@ -140,6 +140,31 @@ then `main`); it is updated only between runs, with `git pull` and `uv sync --lo
 | 2026-11-17 | **ClickHouse loaded for 2026-11-07 to 11-11** (AC-W-03): first pass 14 of 15 venue-days matched; Kraken 11-11 SOL/USD trades were 265 rows short in ClickHouse. Cause: REST backfill pages held trades outside the requested id range from the previous day, which sat in the day's Parquet partition but ClickHouse dates by `ts_recv`. Fixed (only missing ids that fall on the day are kept, DQ-02); the affected venue-days were re-compacted and replayed (all identical), and all 15 venue-days then loaded with row counts and fingerprints equal to Parquet. |
 | 2026-11-18 20:39 | **Mirror soak passed** (2026-11-17 20:25 to 11-18 20:25 UTC, deploy clone at `m3-archive`): 25 hourly runs, 0 with errors or a stop, at most 1.0 h apart, each at most 31.4 s; 282 files (3.6 GB) copied; `tickdb mirror status` shows every closed hour of 11-17 and 11-18 copied; `tickdb mirror verify` re-hashed all 437 files of those days, 0 mismatches (118 files end without a zstd frame footer: the recorder's own still-open or dead-connection files, reported not failed). Recorder ingest p99 during mirror runs vs the 30 minutes before (109 runs): median binance-usdm 203.8 vs 198.1 µs, coinbase 274.0 vs 276.9, kraken 184.9 vs 183.7; every maximum during runs lower than before. |
 
+## Query verification (M4, AC-W-04)
+
+`tickdb verify --date D [--venue V]` recomputes the typical queries from the mirrored raw
+frames with DuckDB's own JSON functions, compares them with the Parquet archive and ClickHouse,
+and appends a row to `results/experiment_log.csv` (every run, failed ones included).
+For each venue the run has 18 checks:
+
+- for each of the 3 symbols, the trade aggregates and the 1-minute OHLCV, compared with raw for each of the 2 backends;
+- for each symbol, BBO at 20 seeded times and the as-of join's row count and mean spread, compared between the backends.
+
+It needs the day's raw files, so it runs within the 7-day raw retention.
+
+Real-data runs, 2026-11-18 (all at `nice 10`, ionice idle):
+
+| Days | Commit | Result |
+|---|---|---|
+| 2026-11-08, 11-09, 11-10 | `94bcd3c` | 6 / 18 per venue. The raw files were already gone (retention), so the raw side had 0 trades. The 12 raw comparisons failed and the 6 cross-backend checks passed. These days can't be verified any more. |
+| 2026-11-17 | `94bcd3c` | binance-usdm 16 / 18 and coinbase 17 / 18. Counts, ids, first and last trades all matched. Σqty and VWAP differed by about 2-3e-12 relative, from the order of a plain float sum over 1.7 M trades. Fixed in `9579e94` with compensated sums (DuckDB `fsum`, ClickHouse `sumKahan`); the tolerance is unchanged. |
+| 2026-11-11, 11-16, 11-17 | `9579e94` | **18 / 18 on every venue**: 3 days × 9 streams, so AC-W-04 passes. |
+
+2026-11-16 had never been archived, because the daily job was down from 11-13 to 11-17. For
+this check it was compacted and loaded on 2026-11-18 with `tickdb compact` and `tickdb load`
+(load fingerprints OK on all three venues). Its backfill, replay check and gap report have not
+run yet; until they do, retention keeps its raw files.
+
 ## Tests that need local resources
 
 ```bash

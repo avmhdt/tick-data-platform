@@ -21,12 +21,14 @@ services:
       CLICKHOUSE_USER: ${CLICKHOUSE_USER:-tickdb}
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?set CLICKHOUSE_PASSWORD in .env (scripts/gen_env.sh)}
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+      CLICKHOUSE_READONLY_PASSWORD: ${CLICKHOUSE_READONLY_PASSWORD:?set CLICKHOUSE_READONLY_PASSWORD in .env (scripts/gen_env.sh)}
     ports:
       - "127.0.0.1:${CLICKHOUSE_HTTP_PORT:-8123}:8123"
     volumes:
       - ${DATA_ROOT:?set DATA_ROOT in .env}/clickhouse:/var/lib/clickhouse
       - ./docker/clickhouse/config.d/tickdb.xml:/etc/clickhouse-server/config.d/tickdb.xml:ro
       - ./docker/clickhouse/users.d/tickdb_profile.xml:/etc/clickhouse-server/users.d/tickdb_profile.xml:ro
+      - ./docker/clickhouse/users.d/tickdb_ro.xml:/etc/clickhouse-server/users.d/tickdb_ro.xml:ro
       - ./docker/clickhouse/init:/docker-entrypoint-initdb.d:ro
     ulimits:
       nofile: {soft: 262144, hard: 262144}

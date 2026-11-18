@@ -525,8 +525,15 @@ def replay_cmd(
             keep_scratch=keep_scratch, kraken_depth=vcfg.book.depth or 1000,
         )  # fmt: skip
         from tickdb.retention import record_verify
+        from tickdb.verify import log_experiment
 
         record_verify(root, name, day, report)
+        log_experiment(
+            "tickdb replay --verify",
+            {"date": date_, "venue": name},
+            {"partitions": len(report["partitions"]), "seconds": report["seconds"]},
+            bool(report["ok"]),
+        )
         typer.echo(json.dumps(report))
         ok &= report["ok"]
     raise typer.Exit(EXIT_OK if ok or not verify else EXIT_MISMATCH)
@@ -851,3 +858,49 @@ def dq_checkpoints(
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(_orjson.dumps(result, option=_orjson.OPT_INDENT_2))
     typer.echo(json.dumps(result))
+
+
+@app.command("verify")
+def verify_cmd(
+    date_: DateOpt,
+    venue: VenueOpt = None,
+    backends: Annotated[
+        str, typer.Option(help="clickhouse,parquet or one of them.")
+    ] = "clickhouse,parquet",
+    seed: Annotated[int, typer.Option(help="Seed for the random BBO timestamps.")] = 7,
+    dest: DestOpt = None,
+    raw: Annotated[Path | None, typer.Option(help="Raw root; default the shared mirror.")] = None,
+    config: ConfigOpt = None,
+) -> None:
+    """Recompute typical queries from the raw files (DuckDB) and compare with the backends.
+
+    Exit 2 on any mismatch. Every run is logged to results/experiment_log.csv.
+
+    Example: tickdb verify --date 2026-11-18
+    """
+    from datetime import date as _date
+
+    from tickdb import verify
+    from tickdb.client import connect
+
+    settings, cfg = _load(config)
+    root = dest or Path(cfg.data_root).expanduser()
+    day = _date.fromisoformat(date_)
+    wanted = {b.strip() for b in backends.split(",")}
+    use_ch = "clickhouse" in wanted and settings.clickhouse_readonly_password is not None
+    ch = connect("clickhouse", settings=settings, root=str(root)) if use_ch else None
+    pq = connect("parquet", settings=settings, root=str(root))
+    roots = [_raw_root(root, raw)]
+    ok = True
+    for name in _venue_list(cfg, venue):
+        checks = verify.verify_day(
+            roots, root, name, day, tuple(cfg.venues[name].symbols),
+            clickhouse=ch._clickhouse() if ch else None, client_ch=ch, client_pq=pq, seed=seed,
+        )  # fmt: skip
+        result = verify.report(checks)
+        params = {"date": date_, "venue": name, "backends": sorted(wanted), "seed": seed}
+        metrics = {"passed": result["passed"], "total": result["total"]}
+        verify.log_experiment("tickdb verify", params, metrics, result["ok"])
+        typer.echo(verify.dumps({"venue": name, "date": date_, **result}))
+        ok &= result["ok"]
+    raise typer.Exit(EXIT_OK if ok else EXIT_MISMATCH)

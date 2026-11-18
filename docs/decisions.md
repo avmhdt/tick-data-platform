@@ -233,3 +233,29 @@ the build. `DECISIONS.md` overrides the spec, and the spec overrides `README.md`
     `meta/verify/`; it leaves a tombstone so the mirror never copies the day again.
 13. **The daily job runs under cron in WSL** until Docker's WSL integration is back (then the
     compose `scheduler` service). The cron line is in `docs/operations.md`; the owner adds it.
+
+### M4 (2026-11-18)
+
+1. **Ranges filter on exchange time.** `Client.trades` and `book_l2` filter `[start, end)` on
+   `ts_exchange`, quotes and bars on `ts`; partitions are by receive date (DQ-02), so both
+   backends scan the day before and after. The as-of join's range applies to its join key
+   (`ts_exchange`, or `ts_recv` with `on="recv"`).
+2. **As-of ties are resolved the same way in both engines:** several quotes with the same key
+   keep the last in archive order (largest `ts_recv`, then `seq`); ClickHouse uses `argMax`
+   over a grouped subquery, Polars a sorted `unique(keep="last")`. Quotes in resync are never
+   used; `tolerance` turns older quotes into nulls. A property test checks Polars against a
+   brute-force reference, and an integration test checks ClickHouse against Polars.
+3. **Cross-venue joins** pick the other venue's symbol with the same base asset from
+   `config/instruments.csv` (or `quote_symbol`) and always join on receive time.
+4. **No `FINAL` yet.** ClickHouse partitions are only ever replaced whole from Parquet; with no
+   intraday inserts there is nothing for `FINAL` to collapse. It comes with intraday loads.
+5. **Read-only user** `tickdb_ro` (`readonly = 2`, `GRANT SELECT ON tickdb.*`), its password
+   from the environment. The client always uses it.
+6. **`tickdb verify`'s raw path** decodes the day's websocket trade frames from the mirrored
+   capture into JSON lines and lets DuckDB extract and deduplicate the trades with its own JSON
+   functions: none of the normalizers is involved. It compares websocket trades (REST rows have
+   no raw websocket counterpart). BBO samples and the as-of join are compared between the two
+   backends, since recomputing a book from raw would repeat the normalizer.
+7. **ClickHouse write tests run only on a throwaway server** (`TICKDB_TEST_CLICKHOUSE=1`, set
+   in CI): the fixture day is 2026-11-09, a real archive day, and `REPLACE PARTITION` would
+   overwrite the live rows.
