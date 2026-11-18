@@ -116,20 +116,21 @@ SELECT {trade_sel},
        {pick}
 FROM (
     SELECT {", ".join(cols)},
-           row_number() OVER (ORDER BY ts_recv, toUInt64OrZero(trade_id), trade_id) AS _row
+           row_number() OVER (ORDER BY ts_recv, toUInt64OrZero(trade_id), trade_id) AS _row,
+           toUInt8(1) AS _k
     FROM {database}.trades
     WHERE venue = {{venue:String}} AND symbol = {{symbol:String}}
       AND {tkey} >= {{start:Int64}} AND {tkey} < {{end:Int64}}
 ) AS t
 ASOF LEFT JOIN (
-    SELECT {qkey} AS quote_ts,
+    SELECT {qkey} AS quote_ts, toUInt8(1) AS _k,
            argMax(bid_px, (ts_recv, seq)) AS bid_px, argMax(bid_qty, (ts_recv, seq)) AS bid_qty,
            argMax(ask_px, (ts_recv, seq)) AS ask_px, argMax(ask_qty, (ts_recv, seq)) AS ask_qty
     FROM {database}.bbo
     WHERE venue = {{quote_venue:String}} AND symbol = {{quote_symbol:String}} AND NOT in_resync
       AND {qkey} >= {{start:Int64}} - {{lookback:Int64}} AND {qkey} < {{end:Int64}}
     GROUP BY quote_ts
-) AS q ON t.{tkey} {cmp} q.quote_ts
+) AS q ON t._k = q._k AND t.{tkey} {cmp} q.quote_ts
 ORDER BY t._row
 SETTINGS join_use_nulls = 1
 """

@@ -3,15 +3,17 @@
 ```python
 import tickdb
 
-db = tickdb.connect()               # ClickHouse, read-only user tickdb_ro
+db = tickdb.connect()  # ClickHouse, read-only user tickdb_ro
 # db = tickdb.connect("parquet")    # or read the Parquet archive directly, no server needed
 
-trades = db.trades("binance-usdm", "BTCUSDT", "2026-11-18", "2026-11-19")      # Polars
+trades = db.trades("binance-usdm", "BTCUSDT", "2026-11-18", "2026-11-19")  # Polars
 quotes = db.quotes("kraken", "BTC/USD", "2026-11-18", "2026-11-19", as_="arrow")  # Arrow
 bars = db.bars("coinbase", "BTC-USD", "2026-11-18", "2026-11-19", interval="5m", fill="forward")
 joined = db.asof_trades_quotes("binance-usdm", "BTCUSDT", "2026-11-18", "2026-11-19")
-db.sql("SELECT venue, count() FROM tickdb.trades WHERE date = {d:Date} GROUP BY venue",
-       {"d": "2026-11-18"})
+db.sql(
+    "SELECT venue, count() FROM tickdb.trades WHERE date = {d:Date} GROUP BY venue",
+    {"d": "2026-11-18"},
+)
 ```
 
 Ranges are half-open `[start, end)`: ISO strings, dates, UTC datetimes or int ns. Results come
