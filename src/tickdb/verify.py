@@ -10,7 +10,10 @@ Parquet archive (DuckDB over the files) and ClickHouse (SQL):
 - between the backends: BBO at 20 seeded random receive times, and the as-of join's row count
   and mean spread.
 
-Counts and ids must match exactly; float aggregates within relative 1e-12 (NFR-06).
+Counts and ids must match exactly; float aggregates within relative 1e-12 (NFR-06). Sums are
+compensated (DuckDB ``fsum``, ClickHouse ``sumKahan``): a plain float sum over a million trades
+depends on the scan order by about 1e-12, which would make the check test the engines' row
+order rather than the data. A day whose raw files are gone (retention) has no raw trades and fails.
 """
 
 from __future__ import annotations
@@ -57,17 +60,17 @@ RAW_SQL = {
         FROM (SELECT unnest(CAST(msg->'$.data' AS JSON[])) AS t, ts_recv FROM src)""",
 }
 AGG_SQL = """
-    SELECT count(*) AS n_trades, sum(qty) AS sum_qty, sum(price * qty) / sum(qty) AS vwap,
+    SELECT count(*) AS n_trades, fsum(qty) AS sum_qty, fsum(price * qty) / fsum(qty) AS vwap,
            arg_min(id, (ts_exchange, id)) AS first_id, arg_min(price, (ts_exchange, id)) AS first_px,
            arg_max(id, (ts_exchange, id)) AS last_id, arg_max(price, (ts_exchange, id)) AS last_px
     FROM {table} WHERE symbol = ?"""
 BARS_SQL = """
     SELECT ts_exchange - ts_exchange % 60000000000 AS ts,
            arg_min(price, (ts_exchange, id)) AS open, max(price) AS high, min(price) AS low,
-           arg_max(price, (ts_exchange, id)) AS close, sum(qty) AS volume, count(*) AS n_trades
+           arg_max(price, (ts_exchange, id)) AS close, fsum(qty) AS volume, count(*) AS n_trades
     FROM {table} WHERE symbol = ? GROUP BY 1 ORDER BY 1"""
 CH_AGG = """
-    SELECT count() AS n_trades, sum(qty) AS sum_qty, sum(price * qty) / sum(qty) AS vwap,
+    SELECT count() AS n_trades, sumKahan(qty) AS sum_qty, sumKahan(price * qty) / sumKahan(qty) AS vwap,
            argMin(toInt64(trade_id), (ts_exchange, toInt64(trade_id))) AS first_id,
            argMin(price, (ts_exchange, toInt64(trade_id))) AS first_px,
            argMax(toInt64(trade_id), (ts_exchange, toInt64(trade_id))) AS last_id,
@@ -78,7 +81,7 @@ CH_BARS = """
     SELECT ts_exchange - ts_exchange % 60000000000 AS ts,
            argMin(price, (ts_exchange, toInt64(trade_id))) AS open, max(price) AS high,
            min(price) AS low, argMax(price, (ts_exchange, toInt64(trade_id))) AS close,
-           sum(qty) AS volume, count() AS n_trades
+           sumKahan(qty) AS volume, count() AS n_trades
     FROM tickdb.trades
     WHERE venue = {venue:String} AND symbol = {symbol:String} AND date = {day:Date} AND source = 'ws'
     GROUP BY ts ORDER BY ts"""
