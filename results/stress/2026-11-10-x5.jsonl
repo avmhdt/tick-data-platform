@@ -1,0 +1,3 @@
+{"venue":"binance-usdm","factor":5.0,"target_rate":5080.0,"achieved_rate":5085.4,"frames_sent":101708,"frames_spooled":101708,"loop_lag_p99_ms":1.13,"loop_lag_median_ms":0.46,"ingest_delay_share_under_5ms":1.0,"max_queue_depth":31}
+{"venue":"kraken","factor":5.0,"target_rate":7795.0,"achieved_rate":7803.25,"frames_sent":156065,"frames_spooled":156065,"loop_lag_p99_ms":1.16,"loop_lag_median_ms":0.149,"ingest_delay_share_under_5ms":1.0,"max_queue_depth":49}
+{"venue":"coinbase","factor":5.0,"target_rate":1770.0,"achieved_rate":1774.4,"frames_sent":35488,"frames_spooled":35488,"loop_lag_p99_ms":1.15,"loop_lag_median_ms":0.299,"ingest_delay_share_under_5ms":0.99992,"max_queue_depth":31}

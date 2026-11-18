@@ -246,7 +246,7 @@ def test_plans_match_shared_capture_endpoints() -> None:
     ((_cb_url, cb_msgs),) = smoke.ws_plan("coinbase", cfg.venues["coinbase"])
     assert orjson.loads(cb_msgs[0])["channels"] == ["matches", "level2_batch", "heartbeat"]
     ((_, kr_msgs),) = smoke.ws_plan("kraken", cfg.venues["kraken"])
-    assert orjson.loads(kr_msgs[0])["params"]["depth"] == 100
+    assert orjson.loads(kr_msgs[0])["params"]["depth"] == 1000
     assert smoke.rest_plan("binance-usdm", cfg.venues["binance-usdm"])[1]["limit"] == 1000
     assert smoke.rest_plan("coinbase", cfg.venues["coinbase"])[0].endswith("/products/BTC-USD/book")
     assert smoke.rest_plan("kraken", cfg.venues["kraken"])[1]["pair"] == "XBTUSD"
