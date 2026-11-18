@@ -552,22 +552,29 @@ def read_table(data_root: Path, name: str, first: date, last: date) -> pa.Table:
 def load_day(
     client: Any, data_root: Path, venue: str, day: date, database: str = "tickdb"
 ) -> dict[str, int]:
-    """dq_daily and dq_outliers -> ClickHouse with REPLACE PARTITION (idempotent)."""
+    """dq_daily, dq_outliers and dq_latency -> ClickHouse with REPLACE PARTITION (idempotent),
+    and the day's gap rows into ``gaps`` (ReplacingMergeTree on the gap key: a re-load replaces
+    a gap's status; read it with FINAL)."""
     import uuid
 
     part = f"('{day.isoformat()}', '{venue}')"
     loaded = {}
-    for name in ("dq_daily", "dq_outliers"):
+    for name in ("dq_daily", "dq_outliers", "dq_latency"):
         path = data_root / "meta" / name / f"date={day.isoformat()}" / f"venue={venue}.parquet"
-        table = pq.read_table(path).cast(schemas.SCHEMAS[name])
-        staging = f"{database}._stage_{name}_{uuid.uuid4().hex[:12]}"
-        client.command(f"CREATE TABLE {staging} AS {database}.{name}")
-        try:
-            if table.num_rows:
+        schema = DQ_LATENCY if name == "dq_latency" else schemas.SCHEMAS[name]
+        table = pq.read_table(path).cast(schema)
+        if not table.num_rows:  # nothing that day: an empty source can't REPLACE a partition
+            client.command(f"ALTER TABLE {database}.{name} DROP PARTITION {part}")
+        else:
+            staging = f"{database}._stage_{name}_{uuid.uuid4().hex[:12]}"
+            client.command(f"CREATE TABLE {staging} AS {database}.{name}")
+            try:
                 client.insert_arrow(staging, table)
-            client.command(f"ALTER TABLE {database}.{name} REPLACE PARTITION {part} FROM {staging}")
-        finally:
-            client.command(f"DROP TABLE IF EXISTS {staging}")
+                client.command(
+                    f"ALTER TABLE {database}.{name} REPLACE PARTITION {part} FROM {staging}"
+                )
+            finally:
+                client.command(f"DROP TABLE IF EXISTS {staging}")
         got = client.query(
             f"SELECT count() FROM {database}.{name} WHERE date = toDate('{day.isoformat()}') "
             f"AND venue = '{venue}'"
@@ -577,4 +584,10 @@ def load_day(
                 f"{name} {venue} {day}: {got} rows in ClickHouse, {table.num_rows} in Parquet"
             )
         loaded[name] = table.num_rows
+    gaps = data_root / "meta" / "gaps" / f"venue={venue}" / f"date={day.isoformat()}"
+    if gaps.exists():
+        table = pq.read_table(gaps).cast(schemas.GAPS)
+        if table.num_rows:
+            client.insert_arrow(f"{database}.gaps", table)
+        loaded["gaps"] = table.num_rows
     return loaded

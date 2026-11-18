@@ -115,3 +115,31 @@ def test_verify_against_both_backends(
         result = verify.report(checks)
         assert result["ok"], result
         assert result["total"] == 6  # 2 vs Parquet, 2 vs ClickHouse, BBO samples, as-of
+
+
+def test_dq_tables_load_into_clickhouse(
+    backends: tuple[object, object], tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    from tickdb.dq import daily
+
+    clickhouse, parquet = backends
+    root = parquet.root  # type: ignore[attr-defined]
+    writer = ch.connect_settings(Settings(_env_file=None))  # type: ignore[call-arg]
+    shared = tmp_path_factory.mktemp("shared")
+    for venue, symbol in VENUES.items():
+        result = daily.check_day(root, venue, DAY, (symbol,), shared_root=shared)
+        daily.write_day(root, result)
+        for _ in range(2):  # idempotent, and an empty outlier day drops its partition
+            loaded = daily.load_day(writer, root, venue, DAY)
+        assert loaded["dq_daily"] == 3
+        assert loaded["dq_latency"] == 48
+    got = clickhouse.sql(  # type: ignore[attr-defined]
+        "SELECT venue, count() AS n FROM tickdb.dq_daily FINAL WHERE date = {d:Date} "
+        "GROUP BY venue ORDER BY venue",
+        {"d": DAY},
+    )
+    assert got["n"].to_list() == [3, 3, 3]
+    gaps = clickhouse.sql(  # type: ignore[attr-defined]
+        "SELECT count() AS n FROM tickdb.gaps FINAL WHERE venue = 'coinbase'"
+    )
+    assert gaps["n"][0] >= 1

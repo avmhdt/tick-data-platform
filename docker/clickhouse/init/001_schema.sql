@@ -184,3 +184,22 @@ CREATE TABLE IF NOT EXISTS tickdb.dq_outliers
 ENGINE = ReplacingMergeTree
 PARTITION BY (date, venue)
 ORDER BY (venue, symbol, ts_recv, trade_id, rule);
+
+-- Feed latency per hour (DQ-08), written by the daily DQ checks; read by Grafana and the DQ site.
+CREATE TABLE IF NOT EXISTS tickdb.dq_latency
+(
+    date Date,
+    venue LowCardinality(String),
+    symbol LowCardinality(String),
+    dataset LowCardinality(String),
+    hour Int8,
+    n Int64,
+    p50_ms Nullable(Float64),
+    p99_ms Nullable(Float64),
+    max_ms Nullable(Float64),
+    clock_offset_max_ms Nullable(Float64),
+    unreliable Bool
+)
+ENGINE = ReplacingMergeTree
+PARTITION BY (date, venue)
+ORDER BY (venue, symbol, dataset, hour);

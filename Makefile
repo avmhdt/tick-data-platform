@@ -5,7 +5,7 @@ export UV_PROJECT_ENVIRONMENT ?= $(HOME)/.cache/tickdb/venv
 DATA_ROOT ?= $(shell grep -E '^DATA_ROOT=' .env 2>/dev/null | cut -d= -f2-)
 COMPOSE := TICKDB_UID=$(shell id -u) TICKDB_GID=$(shell id -g) docker compose
 
-.PHONY: help env sync up down ps logs lint test test-integration smoke clock docs data-link check-env
+.PHONY: help env sync up down ps logs lint test test-integration smoke clock docs data-link check-env check-monitoring dashboards dq-site
 
 help:
 	@grep -E '^[a-z-]+:' Makefile | cut -d: -f1 | sort | tr '\n' ' '; echo
@@ -21,11 +21,11 @@ check-env: sync
 
 data-link:      ## data/ -> $DATA_ROOT (git-ignored symlink)
 	@test -n "$(DATA_ROOT)" || (echo "DATA_ROOT not set in .env" >&2; exit 3)
-	mkdir -p "$(DATA_ROOT)"/{raw,interim,meta,clickhouse,prometheus,grafana}
+	mkdir -p "$(DATA_ROOT)"/{raw,interim,meta,meta/clock,clickhouse,prometheus,grafana}
 	@test -e data || ln -s "$(DATA_ROOT)" data
 
 up: check-env data-link
-	$(COMPOSE) up -d --wait
+	$(COMPOSE) up -d --build --wait
 
 down:
 	$(COMPOSE) down
@@ -55,3 +55,12 @@ clock: sync
 
 docs: sync
 	uv run mkdocs build --strict
+
+dashboards: sync  ## regenerate docker/grafana/dashboards/*.json
+	uv run python scripts/gen_dashboards.py
+
+check-monitoring: sync  ## AC-W-09: Prometheus targets and rules, Grafana dashboards and panel queries
+	set -a; source .env; set +a; uv run python scripts/check_monitoring.py
+
+dq-site: sync  ## AC-H-04: public DQ site (aggregates only) into site-dq/
+	uv run tickdb dq site --out site-dq

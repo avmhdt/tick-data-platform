@@ -617,6 +617,64 @@ def dq_summary(
     typer.echo(str(path))
 
 
+@dq_app.command("acceptance")
+def dq_acceptance(
+    from_: FromOpt,
+    to: Annotated[str, typer.Option("--to", help="Last UTC date (inclusive).")],
+    out: Annotated[Path, typer.Option(help="JSON written here.")] = Path(
+        "results/dq_acceptance.json"
+    ),
+    dest: DestOpt = None,
+    config: ConfigOpt = None,
+) -> None:
+    """AC-W-02 evidence (gaps classified and recovered, no duplicates, binance.vision) and
+    whether every compacted day has DQ rows. Exit 1 if AC-W-02 does not pass.
+
+    Example: tickdb dq acceptance --from 2026-11-07 --to 2026-11-17
+    """
+    from datetime import date as _date
+
+    from tickdb.dq import acceptance
+
+    _, cfg = _load(config)
+    root = dest or Path(cfg.data_root).expanduser()
+    result = acceptance.evaluate(
+        root, _date.fromisoformat(from_), _date.fromisoformat(to),
+        vision=Path("results") / "binance_vision_check.json",
+    )  # fmt: skip
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    typer.echo(json.dumps(result, indent=2))
+    raise typer.Exit(EXIT_OK if result["ac_w02"]["pass"] else EXIT_FAIL)
+
+
+@dq_app.command("site")
+def dq_site(
+    out: Annotated[Path, typer.Option(help="Output folder.")] = Path("site-dq"),
+    from_: Annotated[str | None, typer.Option("--from", help="First UTC date.")] = None,
+    to: Annotated[str | None, typer.Option("--to", help="Last UTC date (inclusive).")] = None,
+    dest: DestOpt = None,
+    config: ConfigOpt = None,
+) -> None:
+    """Static public DQ site (aggregates only): coverage heatmap, status, latency, gaps.
+
+    Example: tickdb dq site --out site-dq --from 2026-11-18
+    """
+    from datetime import date as _date
+
+    from tickdb.dq import daily, site
+
+    _, cfg = _load(config)
+    root = dest or Path(cfg.data_root).expanduser()
+    summary = site.build(
+        root, out,
+        _date.fromisoformat(from_) if from_ else None,
+        _date.fromisoformat(to) if to else None,
+        limits=daily.Limits.from_config(cfg.dq),
+    )  # fmt: skip
+    typer.echo(json.dumps(summary))
+
+
 @dq_app.command("daily")
 def dq_daily(
     date_: DateOpt,
@@ -658,6 +716,33 @@ def dq_daily(
         line = {"venue": name, "date": date_, "status": statuses}
         typer.echo(json.dumps(line | {"outliers": result.outliers.num_rows, "loaded": loaded}))
     raise typer.Exit(EXIT_FAIL if failed else EXIT_OK)
+
+
+@app.command("exporter")
+def exporter_cmd(
+    port: Annotated[int, typer.Option(help="Port for /metrics.")] = 9108,
+    addr: Annotated[str, typer.Option(help="Listen address.")] = "0.0.0.0",
+    shared_root: Annotated[
+        Path | None, typer.Option(help="Shared capture root; default capture.shared_root.")
+    ] = None,
+    guard: Annotated[
+        Path | None, typer.Option(help="Host drive whose free space is guarded (/mnt/g).")
+    ] = None,
+    dest: DestOpt = None,
+    config: ConfigOpt = None,
+) -> None:
+    """Prometheus exporter for the shared capture, NTP probe, disk and job status (FR-18 to 21).
+
+    Runs in compose as the `exporter` service; Prometheus scrapes it every 15 s.
+
+    Example: tickdb exporter --port 9108
+    """
+    from tickdb.monitor import exporter
+
+    settings, cfg = _load(config)
+    root = dest or Path(cfg.data_root).expanduser()
+    shared = shared_root or Path(cfg.capture.shared_root).expanduser()
+    exporter.serve(shared, root, port, settings.ntp_server, addr=addr, guard=guard)
 
 
 @app.command("backfill")

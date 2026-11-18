@@ -1,0 +1,342 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": false,
+  "panels": [
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "description": "DQ-10: minutes with at least one message / 1440 (maintenance excluded)",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 95
+              },
+              {
+                "color": "green",
+                "value": 99
+              }
+            ]
+          },
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "mergeValues": false,
+        "rowHeight": 0.8,
+        "showValue": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 0,
+          "pluginVersion": "4.23.4",
+          "queryType": "timeseries",
+          "rawSql": "SELECT toDateTime(date) AS time, concat(venue, ' ', symbol, ' ', dataset) AS stream, coverage_pct AS value FROM tickdb.dq_daily FINAL WHERE $__dateFilter(date) AND venue IN (${venue:singlequote}) ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "title": "Coverage per stream (% of minutes)",
+      "type": "state-timeline"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 12
+      },
+      "id": 2,
+      "options": {
+        "stacking": "normal",
+        "xField": "day"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "pluginVersion": "4.23.4",
+          "queryType": "table",
+          "rawSql": "SELECT toString(date) AS day, countIf(status = 'pass') AS pass, countIf(status = 'warn') AS warn, countIf(status = 'fail') AS fail FROM tickdb.dq_daily FINAL WHERE $__dateFilter(date) AND venue IN (${venue:singlequote}) GROUP BY day ORDER BY day",
+          "refId": "A"
+        }
+      ],
+      "title": "Daily status",
+      "type": "barchart"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 12
+      },
+      "id": 3,
+      "options": {
+        "drawStyle": "bars"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 0,
+          "pluginVersion": "4.23.4",
+          "queryType": "timeseries",
+          "rawSql": "SELECT toDateTime(date) AS time, concat(venue, ' ', symbol) AS stream, sum(dup_rows_removed) AS value FROM tickdb.dq_daily FINAL WHERE $__dateFilter(date) AND venue IN (${venue:singlequote}) AND dataset = 'trades' GROUP BY time, stream ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "title": "Duplicates removed (trades)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "description": "DQ-09; flagged, never deleted",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 20
+      },
+      "id": 4,
+      "options": {},
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 0,
+          "pluginVersion": "4.23.4",
+          "queryType": "timeseries",
+          "rawSql": "SELECT toDateTime(date) AS time, concat(venue, ' ', rule) AS series, count() AS value FROM tickdb.dq_outliers FINAL WHERE $__dateFilter(date) AND venue IN (${venue:singlequote}) GROUP BY time, series ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "title": "Outliers flagged",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 20
+      },
+      "id": 5,
+      "options": {},
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 0,
+          "pluginVersion": "4.23.4",
+          "queryType": "timeseries",
+          "rawSql": "SELECT toDateTime(date) AS time, concat(venue, ' ', symbol) AS stream, sum(crossed_bbo) AS value FROM tickdb.dq_daily FINAL WHERE $__dateFilter(date) AND venue IN (${venue:singlequote}) AND dataset = 'bbo' GROUP BY time, stream ORDER BY time",
+          "refId": "A"
+        }
+      ],
+      "title": "Crossed books outside resync",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 28
+      },
+      "id": 6,
+      "options": {},
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "pluginVersion": "4.23.4",
+          "queryType": "table",
+          "rawSql": "SELECT fromUnixTimestamp64Nano(start_recv) AS start, venue, symbol, channel, kind, round((end_recv - start_recv) / 1e9, 1) AS seconds, recovery, status, recovered_rows FROM tickdb.gaps FINAL WHERE $__timeFilter(fromUnixTimestamp64Nano(start_recv)) AND venue IN (${venue:singlequote}) ORDER BY start_recv DESC LIMIT 1000",
+          "refId": "A"
+        }
+      ],
+      "title": "Gaps",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "clickhouse"
+      },
+      "description": "",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 38
+      },
+      "id": 7,
+      "options": {},
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "pluginVersion": "4.23.4",
+          "queryType": "table",
+          "rawSql": "SELECT date, venue, symbol, dataset, status, rows, coverage_pct, gap_count, gap_seconds_unrecovered, dup_rows_removed, outliers, crossed_bbo, round(latency_p50_ms, 1) AS p50_ms, round(latency_p99_ms, 1) AS p99_ms, round(clock_offset_max_ms, 1) AS clock_ms FROM tickdb.dq_daily FINAL WHERE $__dateFilter(date) AND venue IN (${venue:singlequote}) ORDER BY date DESC, venue, symbol, dataset",
+          "refId": "A"
+        }
+      ],
+      "title": "Daily DQ rows",
+      "type": "table"
+    }
+  ],
+  "refresh": "",
+  "schemaVersion": 39,
+  "tags": [
+    "tickdb"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "datasource": {
+          "type": "grafana-clickhouse-datasource",
+          "uid": "clickhouse"
+        },
+        "definition": "SELECT DISTINCT venue FROM tickdb.dq_daily ORDER BY venue",
+        "includeAll": true,
+        "label": "Venue",
+        "multi": true,
+        "name": "venue",
+        "query": {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "clickhouse"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "pluginVersion": "4.23.4",
+          "queryType": "table",
+          "rawSql": "SELECT DISTINCT venue FROM tickdb.dq_daily ORDER BY venue",
+          "refId": "v"
+        },
+        "refresh": 2,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-30d",
+    "to": "now"
+  },
+  "timezone": "utc",
+  "title": "Data quality",
+  "uid": "tickdb-data-quality",
+  "version": 1
+}

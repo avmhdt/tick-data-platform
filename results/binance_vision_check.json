@@ -1,0 +1,44 @@
+[
+  {
+    "date": "2026-11-08",
+    "symbol": "BTCUSDT",
+    "archive_ids": 726372,
+    "vision_ids": 726372,
+    "missing_in_archive": 0,
+    "extra_in_archive": 0,
+    "first_missing": [],
+    "first_extra": [],
+    "vendor_rows": 0,
+    "circular": false,
+    "next_day_archived": true,
+    "equal": true
+  },
+  {
+    "date": "2026-11-09",
+    "symbol": "BTCUSDT",
+    "archive_ids": 1551055,
+    "vision_ids": 1551055,
+    "missing_in_archive": 0,
+    "extra_in_archive": 0,
+    "first_missing": [],
+    "first_extra": [],
+    "vendor_rows": 0,
+    "circular": false,
+    "next_day_archived": true,
+    "equal": true
+  },
+  {
+    "date": "2026-11-10",
+    "symbol": "BTCUSDT",
+    "archive_ids": 1521662,
+    "vision_ids": 1521662,
+    "missing_in_archive": 0,
+    "extra_in_archive": 0,
+    "first_missing": [],
+    "first_extra": [],
+    "vendor_rows": 0,
+    "circular": false,
+    "next_day_archived": true,
+    "equal": true
+  }
+]

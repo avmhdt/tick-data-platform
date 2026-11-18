@@ -173,3 +173,35 @@ def test_maintenance_minutes(tmp_path: Path) -> None:
     assert daily.maintenance_minutes("kraken", DAY, doc) == set(range(1430, 1440))
     assert daily.maintenance_minutes("kraken", date(2026, 11, 10), doc) == set(range(30))
     assert daily.maintenance_minutes("coinbase", DAY, doc) == set()
+
+
+def test_acceptance_counts_classified_and_recovered(tmp_path: Path) -> None:
+    from tickdb.dq import acceptance
+
+    def gap(channel: str, status: str, secs: int, gid: str) -> dict[str, object]:
+        return {
+            "gap_id": gid, "venue": "kraken", "symbol": "BTC/USD", "channel": channel,
+            "kind": "disconnect", "start_recv": START, "end_recv": START + secs * S,
+            "start_exchange": None, "end_exchange": None, "seq_from": None, "seq_to": None,
+            "recovery": "rest_backfill", "status": status, "recovered_rows": 0,
+        }  # fmt: skip
+
+    rows = [gap("trades", "recovered", 90, "a"), gap("trades", "partial", 10, "b"),
+            gap("trades", "unrecoverable", 50, "c"), gap("book_l2", "partial", 30, "d")]  # fmt: skip
+    path = tmp_path / "meta" / "gaps" / "venue=kraken" / f"date={DAY.isoformat()}"
+    path.parent.mkdir(parents=True)
+    pq.write_table(pa.Table.from_pylist(rows, schema=schemas.GAPS), path)
+    notes = tmp_path / "meta" / "dq_daily" / f"date={DAY.isoformat()}"
+    notes.mkdir(parents=True)
+    (notes / "venue=kraken.json").write_bytes(orjson.dumps({"dup_trades_remaining": {"x": 0}}))
+    comp = tmp_path / "meta" / "compaction" / "venue=kraken"
+    comp.mkdir(parents=True)
+    (comp / f"date={DAY.isoformat()}.json").write_text("{}")
+    out = acceptance.evaluate(tmp_path, DAY, DAY)
+    assert out["classified_pct"] == 100.0
+    assert out["trade_gap_seconds_covered"] == 100.0  # the unrecoverable 50 s are outside
+    assert out["trade_gap_recovered_pct"] == 90.0
+    assert out["ac_w02"]["recovered_ge_95pct"] is False
+    assert out["ac_w02"]["zero_duplicates"] is True
+    assert out["ac_w02"]["vision_ge_3_days"] is False
+    assert out["dq_tables_daily"] is True

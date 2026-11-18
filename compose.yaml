@@ -60,6 +60,31 @@ services:
       timeout: 5s
       retries: 12
 
+  # The "ingestor" Prometheus scrapes in shared-capture mode: reads the shared recorder's
+  # status.json (read-only), probes NTP every 60 s, reports disk and job status. Not published
+  # on the host. Optional .env keys: SHARED_CAPTURE_ROOT (absolute; default the
+  # crypto-lob-alpha folder next to DATA_ROOT) and GUARD_PATH (default /mnt/g).
+  exporter:
+    build: {context: ., dockerfile: docker/exporter/Dockerfile}
+    image: tickdb-exporter:0.1.0
+    restart: unless-stopped
+    logging: *logging
+    user: "${TICKDB_UID:-1000}:${TICKDB_GID:-1000}"
+    command: ["--port", "9108", "--shared-root", "/shared", "--dest", "/data", "--guard", "/guard"]
+    environment:
+      NTP_SERVER: ${NTP_SERVER:-pool.ntp.org}
+    volumes:
+      - ${SHARED_CAPTURE_ROOT:-${DATA_ROOT:?set DATA_ROOT in .env}/../crypto-lob-alpha}:/shared:ro
+      - ${DATA_ROOT:?set DATA_ROOT in .env}/meta:/data/meta:ro
+      - ${DATA_ROOT:?set DATA_ROOT in .env}/meta/clock:/data/meta/clock
+      - ${GUARD_PATH:-/mnt/g}:/guard:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:9108/metrics', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
   grafana:
     image: grafana/grafana:13.2.5
     restart: unless-stopped
@@ -67,7 +92,10 @@ services:
     user: "${TICKDB_UID:-1000}:${TICKDB_GID:-1000}"
     depends_on:
       prometheus: {condition: service_healthy}
+      clickhouse: {condition: service_healthy}
     environment:
+      # read by the ClickHouse datasource provisioning ($__env{...}); never logged
+      CLICKHOUSE_READONLY_PASSWORD: ${CLICKHOUSE_READONLY_PASSWORD:?set CLICKHOUSE_READONLY_PASSWORD in .env (scripts/gen_env.sh)}
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in .env (scripts/gen_env.sh)}
       GF_AUTH_ANONYMOUS_ENABLED: "false"
