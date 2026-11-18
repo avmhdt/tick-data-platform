@@ -143,3 +143,33 @@ def test_dq_tables_load_into_clickhouse(
         "SELECT count() AS n FROM tickdb.gaps FINAL WHERE venue = 'coinbase'"
     )
     assert gaps["n"][0] >= 1
+
+
+def test_dq_rows_of_two_days_survive_final(backends: tuple[object, object]) -> None:
+    """FINAL can merge across partitions: the sort key must start with the date."""
+    from datetime import timedelta
+
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    from tickdb.dq import daily
+
+    clickhouse, parquet = backends
+    root = parquet.root  # type: ignore[attr-defined]
+    writer = ch.connect_settings(Settings(_env_file=None))  # type: ignore[call-arg]
+    nxt = DAY + timedelta(days=1)
+    for name in ("dq_daily", "dq_outliers", "dq_latency"):
+        src = root / "meta" / name / f"date={DAY.isoformat()}" / "venue=kraken.parquet"
+        table = pq.read_table(src)
+        rows = [r | {"date": nxt} for r in table.to_pylist()]
+        dst = root / "meta" / name / f"date={nxt.isoformat()}" / "venue=kraken.parquet"
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        pq.write_table(pa.Table.from_pylist(rows, schema=table.schema), dst)
+    daily.load_day(writer, root, "kraken", DAY)
+    daily.load_day(writer, root, "kraken", nxt)
+    for table, per_day in (("dq_daily", 3), ("dq_latency", 48)):
+        got = clickhouse.sql(  # type: ignore[attr-defined]
+            f"SELECT date, count() AS n FROM tickdb.{table} FINAL WHERE venue = 'kraken' "
+            "GROUP BY date ORDER BY date"
+        )
+        assert got["n"].to_list() == [per_day, per_day], table

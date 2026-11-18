@@ -296,6 +296,7 @@
       "description": "Worst symbol per venue and dataset; filled by the daily job for the day before",
       "fieldConfig": {
         "defaults": {
+          "displayName": "${__field.labels.series}",
           "unit": "ms"
         },
         "overrides": []

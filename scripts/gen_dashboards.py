@@ -68,9 +68,13 @@ def panel(
     desc: str = "",
     options: dict[str, Any] | None = None,
     defaults: dict[str, Any] | None = None,
+    label: str | None = None,
+    overrides: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     ds = targets[0]["datasource"] if targets else PROM
     fd: dict[str, Any] = dict(defaults or {})
+    if label:  # ClickHouse long-to-wide series: name them by the label, not "value <label>"
+        fd["displayName"] = "${__field.labels." + label + "}"
     if unit:
         fd["unit"] = unit
     return {
@@ -81,8 +85,15 @@ def panel(
         "datasource": ds,
         "gridPos": lay.place(w, h),
         "targets": targets,
-        "fieldConfig": {"defaults": fd, "overrides": []},
+        "fieldConfig": {"defaults": fd, "overrides": overrides or []},
         "options": options or {},
+    }
+
+
+def _color(field: str, color: str) -> dict[str, Any]:
+    return {
+        "matcher": {"id": "byName", "options": field},
+        "properties": [{"id": "color", "value": {"mode": "fixed", "fixedColor": color}}],
     }
 
 
@@ -169,6 +180,7 @@ def feed_health() -> dict[str, Any]:
             FROM tickdb.dq_latency FINAL
             WHERE $__dateFilter(date) AND {CH_VENUE} AND n > 0
             GROUP BY time, series ORDER BY time""", ref="B", fmt="timeseries")], unit="ms",
+            label="series",
             desc="Worst symbol per venue and dataset; filled by the daily job for the day before"),
         panel(lay, "timeseries", "Reconnects per hour", [prom(
             f"sum by (venue) (changes(tickdb_ws_connection_generation{{{V}}}[1h]))",
@@ -202,38 +214,41 @@ def feed_health() -> dict[str, Any]:
 def data_quality() -> dict[str, Any]:
     lay = Layout()
     p = [
-        panel(lay, "state-timeline", "Coverage per stream (% of minutes)", [ch(f"""
+        panel(lay, "status-history", "Coverage per stream (% of minutes)", [ch(f"""
             SELECT toDateTime(date) AS time, concat(venue, ' ', symbol, ' ', dataset) AS stream,
                    coverage_pct AS value
             FROM tickdb.dq_daily FINAL WHERE $__dateFilter(date) AND {CH_VENUE}
-            ORDER BY time""", fmt="timeseries")], w=24, h=12, unit="percent",
+            ORDER BY time""", fmt="timeseries")], w=24, h=12, unit="percent", label="stream",
             desc="DQ-10: minutes with at least one message / 1440 (maintenance excluded)",
-            options={"showValue": "auto", "mergeValues": False, "rowHeight": 0.8},
+            options={"showValue": "auto", "rowHeight": 0.85, "colWidth": 0.9},
             defaults={"thresholds": THRESH_COVERAGE, "color": {"mode": "thresholds"}}),
         panel(lay, "barchart", "Daily status", [ch(f"""
             SELECT toString(date) AS day, countIf(status = 'pass') AS pass,
                    countIf(status = 'warn') AS warn, countIf(status = 'fail') AS fail
             FROM tickdb.dq_daily FINAL WHERE $__dateFilter(date) AND {CH_VENUE}
             GROUP BY day ORDER BY day""")],
-            options={"stacking": "normal", "xField": "day"}),
+            options={"stacking": "normal", "xField": "day"},
+            overrides=[_color(n, c) for n, c in (("pass", "green"), ("warn", "orange"),
+                                                 ("fail", "red"))]),
         panel(lay, "timeseries", "Duplicates removed (trades)", [ch(f"""
             SELECT toDateTime(date) AS time, concat(venue, ' ', symbol) AS stream,
                    sum(dup_rows_removed) AS value
             FROM tickdb.dq_daily FINAL
             WHERE $__dateFilter(date) AND {CH_VENUE} AND dataset = 'trades'
             GROUP BY time, stream ORDER BY time""", fmt="timeseries")], unit="short",
-            options={"drawStyle": "bars"}),
+            options={"drawStyle": "bars"}, label="stream"),
         panel(lay, "timeseries", "Outliers flagged", [ch(f"""
             SELECT toDateTime(date) AS time, concat(venue, ' ', rule) AS series, count() AS value
             FROM tickdb.dq_outliers FINAL WHERE $__dateFilter(date) AND {CH_VENUE}
             GROUP BY time, series ORDER BY time""", fmt="timeseries")], unit="short",
-            desc="DQ-09; flagged, never deleted"),
+            desc="DQ-09; flagged, never deleted", label="series"),
         panel(lay, "timeseries", "Crossed books outside resync", [ch(f"""
             SELECT toDateTime(date) AS time, concat(venue, ' ', symbol) AS stream,
                    sum(crossed_bbo) AS value
             FROM tickdb.dq_daily FINAL
             WHERE $__dateFilter(date) AND {CH_VENUE} AND dataset = 'bbo'
-            GROUP BY time, stream ORDER BY time""", fmt="timeseries")], unit="short"),
+            GROUP BY time, stream ORDER BY time""", fmt="timeseries")], unit="short",
+            label="stream"),
         panel(lay, "table", "Gaps", [ch(f"""
             SELECT fromUnixTimestamp64Nano(start_recv) AS start, venue, symbol, channel, kind,
                    round((end_recv - start_recv) / 1e9, 1) AS seconds, recovery, status,

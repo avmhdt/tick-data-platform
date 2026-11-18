@@ -259,3 +259,58 @@ the build. `DECISIONS.md` overrides the spec, and the spec overrides `README.md`
 7. **ClickHouse write tests run only on a throwaway server** (`TICKDB_TEST_CLICKHOUSE=1`, set
    in CI): the fixture day is 2026-11-09, a real archive day, and `REPLACE PARTITION` would
    overwrite the live rows.
+
+### M5 (2026-11-18)
+
+1. **The exporter is the "ingestor" Prometheus scrapes.** With one shared capture there is
+   no tickdb ingestor running, so `tickdb exporter` (compose service `exporter`) turns the
+   shared recorder's `status.json` into `tickdb_` metrics at each scrape. It reads only that
+   file, keeps no state, publishes no port, and writes only its own NTP readings to
+   `meta/clock/`. "Prometheus targets for all enabled ingestors are up" (AC-W-09) is the
+   `tickdb-ingest` job with this one target.
+2. **What the recorder doesn't publish.**
+    - It publishes no feed-latency p99, only a running median, so the live alert uses
+      `median > 1 s for 10 min`. The p99 per hour comes from the archive in `dq_latency`, and
+      both dashboards show it. FR-20's threshold is unchanged; only the statistic the live
+      rule reads differs.
+    - It has no queue depth, so the dashboard shows its ingest delay p99 and its dropped or
+      failed writes instead.
+    - Reconnects are counted from changes of the connection generation in its connection
+      names.
+3. **Clock offset for DQ-08.** From 2026-11-18 the exporter probes NTP every 60 s (FR-21).
+   Earlier days use the shared recorder's probes of each venue's server time: one probe can
+   be off by half its round trip (150 to 300 ms), so an hour's value is the median offset of
+   its probes whose round trip is at most 1.5 times the hour's median. On 2026-11-17 that
+   gives 4 to 13 ms against a raw maximum of 3.6 s.
+4. **Outliers against the BBO need a live quote:** not in resync and at most 15 s old (the
+   book silence threshold, DQ-11). Without that, trades backfilled during a book gap were
+   compared with the last quote before the gap (61 false outliers on Kraken on 2026-11-17).
+5. **`dup_rows_removed` is nullable.** Days compacted before M5 recorded only a venue total
+   of removed duplicates; those rows carry null rather than a guessed split. Compaction now
+   counts per symbol. Duplicates *left* in the archive are checked from the archive itself on
+   every day.
+6. **Coverage fail level 95 %** (`dq.coverage_fail_pct`), warn below 99 %, both from AC-W-01.
+   An open gap fails a day; unrecovered gap seconds and outliers make it `warn`. Book gap
+   seconds always count as unrecovered, because L2 history isn't recoverable from free
+   sources.
+7. **DQ tables sort by date first** (`ORDER BY (date, venue, ...)`). With a key without the
+   date, `FINAL` merged rows of different days of a ReplacingMergeTree together, leaving one day
+   per venue. An integration test loads two days and checks both under `FINAL`.
+8. **A `dq_latency` table** (hourly p50, p99, max, clock offset, unreliable flag) is added
+   to ClickHouse next to `dq_daily` and `dq_outliers`. The day's gaps are now inserted into
+   `gaps` too; that table is read with `FINAL`, so a re-load replaces a gap's status.
+9. **Dashboards are generated** by `scripts/gen_dashboards.py`; CI checks that the JSON
+   matches. Grafana reads ClickHouse through the read-only user, whose password reaches the
+   datasource from the container environment.
+10. **Screenshots** came from a throwaway local Grafana with anonymous viewer access, the same
+    provisioning and 127.0.0.1 only; it was removed afterwards. The stack's Grafana keeps
+    anonymous access off.
+11. **The public DQ site** (`tickdb dq site`, `make dq-site`) is one static page with CSV and
+    JSON files. It holds counts, coverage, gap times and durations, latency and status, and no
+    price, size, trade id or content hash (NFR-09). Publishing it needs P-13 (Pages) and is
+    M7's.
+12. **data.binance.vision check** (AC-W-02):
+    - It compares trade-id sets by exchange date. The archive side reads the partitions of D
+      and D+1, because trades late on D arrive after midnight.
+    - Days whose gaps were filled from that same file are circular and don't count.
+    - 2026-11-08, 11-09 and 11-10 are exactly equal: 726,372, 1,551,055 and 1,521,662 ids.

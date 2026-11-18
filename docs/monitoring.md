@@ -53,8 +53,13 @@ the generator.
     - the gap table;
     - every `dq_daily` row.
 
-Screenshots: [feed health](img/grafana_feed_health.png),
-[data quality](img/grafana_data_quality.png).
+Screenshots from 2026-11-18. They were taken from a throwaway local Grafana with the same
+provisioning and anonymous viewer access, which was removed afterwards; the stack's own Grafana
+keeps anonymous access off.
+
+![Feed health](img/grafana_feed_health.png)
+
+![Data quality](img/grafana_data_quality.png)
 
 ## Alerts (FR-20)
 

@@ -15,6 +15,7 @@
           "color": {
             "mode": "thresholds"
           },
+          "displayName": "${__field.labels.stream}",
           "thresholds": {
             "mode": "absolute",
             "steps": [
@@ -44,8 +45,8 @@
       },
       "id": 1,
       "options": {
-        "mergeValues": false,
-        "rowHeight": 0.8,
+        "colWidth": 0.9,
+        "rowHeight": 0.85,
         "showValue": "auto"
       },
       "targets": [
@@ -63,7 +64,7 @@
         }
       ],
       "title": "Coverage per stream (% of minutes)",
-      "type": "state-timeline"
+      "type": "status-history"
     },
     {
       "datasource": {
@@ -73,7 +74,53 @@
       "description": "",
       "fieldConfig": {
         "defaults": {},
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "pass"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "warn"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "fail"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
       },
       "gridPos": {
         "h": 8,
@@ -111,6 +158,7 @@
       "description": "",
       "fieldConfig": {
         "defaults": {
+          "displayName": "${__field.labels.stream}",
           "unit": "short"
         },
         "overrides": []
@@ -150,6 +198,7 @@
       "description": "DQ-09; flagged, never deleted",
       "fieldConfig": {
         "defaults": {
+          "displayName": "${__field.labels.series}",
           "unit": "short"
         },
         "overrides": []
@@ -187,6 +236,7 @@
       "description": "",
       "fieldConfig": {
         "defaults": {
+          "displayName": "${__field.labels.stream}",
           "unit": "short"
         },
         "overrides": []
