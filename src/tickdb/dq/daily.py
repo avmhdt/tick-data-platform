@@ -359,6 +359,8 @@ def check_day(
     lim = limits or Limits()
     start, _end = day_bounds(day)
     comp = _compaction(data_root, venue, day)
+    if not comp:
+        raise FileNotFoundError(f"{venue} {day} is not compacted: no DQ rows written")
     counters = comp.get("counters", {})
     parts = comp.get("partitions", {})
     gaps = [g for g in load_gaps(data_root, day) if g["venue"] == venue]

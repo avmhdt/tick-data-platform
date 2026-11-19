@@ -205,3 +205,8 @@ def test_acceptance_counts_classified_and_recovered(tmp_path: Path) -> None:
     assert out["ac_w02"]["zero_duplicates"] is True
     assert out["ac_w02"]["vision_ge_3_days"] is False
     assert out["dq_tables_daily"] is True
+
+
+def test_uncompacted_day_is_refused(archive: Path, tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="not compacted"):
+        daily.check_day(archive, "coinbase", DAY, ("BTC-USD",), shared_root=tmp_path)

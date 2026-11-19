@@ -708,7 +708,12 @@ def dq_daily(
     failed = False
     for name in _venue_list(cfg, venue):
         symbols = tuple(cfg.venues[name].symbols)
-        result = daily.check_day(root, name, day, symbols, shared_root=shared, limits=lim)
+        try:
+            result = daily.check_day(root, name, day, symbols, shared_root=shared, limits=lim)
+        except FileNotFoundError as exc:
+            typer.echo(str(exc), err=True)
+            failed = True
+            continue
         daily.write_day(root, result)
         loaded = daily.load_day(writer, root, name, day) if writer is not None else None
         statuses = result.statuses

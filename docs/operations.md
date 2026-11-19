@@ -115,8 +115,10 @@ on a Windows sign-out and whose branch changes during development. Logs go to
 `~/data/tick-data-platform` and the load step is skipped; once the ClickHouse password exists,
 copy `.env` into the deploy clone (`chmod 600`).
 
-Cron line for the owner (WSL crontab of `ze`; 01:40 UTC, after the first hour of the next day
-has closed and been mirrored):
+Cron line for the owner (WSL crontab of `ze`). Cron runs on the distro's local time,
+America/Sao_Paulo (UTC−3), so `40 1 * * *` fires at **04:40 UTC**. That is after the first
+hours of the next day have closed and been mirrored, and later than DQ-02's earliest 01:30 UTC.
+Until 2026-11-19 this page said 01:40 UTC.
 
 ```cron
 # tdp-daily: tick-data-platform daily job (compaction, backfill, replay, gap reports, retention). Runs from the ext4 deploy clone.
@@ -139,6 +141,31 @@ then `main`); it is updated only between runs, with `git pull` and `uv sync --lo
 | 2026-11-17 | Project moved off the failing D: drive to `G:\trading-strategy-brainstorm\tick-data-platform` (`/mnt/g/...`); WSL runs from `G:\WSL\Ubuntu`, Docker's disk from `G:\Docker`. WSL down 18:17:46 to 18:58:01 UTC for the move. The mirror's guard path is `/mnt/g`. The stack was recreated from `/mnt/g` so its config mounts no longer point at D:. The deploy clone moved to `m3-archive` (the daily job had failed since 11-13 with "No such command 'scheduler'"). The copy-job soak restarts with the 20:25 run. |
 | 2026-11-17 | **ClickHouse loaded for 2026-11-07 to 11-11** (AC-W-03): first pass 14 of 15 venue-days matched; Kraken 11-11 SOL/USD trades were 265 rows short in ClickHouse. Cause: REST backfill pages held trades outside the requested id range from the previous day, which sat in the day's Parquet partition but ClickHouse dates by `ts_recv`. Fixed (only missing ids that fall on the day are kept, DQ-02); the affected venue-days were re-compacted and replayed (all identical), and all 15 venue-days then loaded with row counts and fingerprints equal to Parquet. |
 | 2026-11-18 20:39 | **Mirror soak passed** (2026-11-17 20:25 to 11-18 20:25 UTC, deploy clone at `m3-archive`): 25 hourly runs, 0 with errors or a stop, at most 1.0 h apart, each at most 31.4 s; 282 files (3.6 GB) copied; `tickdb mirror status` shows every closed hour of 11-17 and 11-18 copied; `tickdb mirror verify` re-hashed all 437 files of those days, 0 mismatches (118 files end without a zstd frame footer: the recorder's own still-open or dead-connection files, reported not failed). Recorder ingest p99 during mirror runs vs the 30 minutes before (109 runs): median binance-usdm 203.8 vs 198.1 µs, coinbase 274.0 vs 276.9, kraken 184.9 vs 183.7; every maximum during runs lower than before. |
+| 2026-11-18 22:33 | **Stack updated for M5:** `dq_daily.dup_rows_removed` made nullable; table `dq_latency` added; the exporter built and started; Prometheus and Grafana restarted with the new scrape job, rules, ClickHouse datasource and dashboards. `make check-monitoring` passed: target up, 12 rules healthy, 21 panel queries without errors. |
+| 2026-11-18 23:00 | **DQ tables recreated:** read with `FINAL`, `dq_daily` showed one day per venue, because its sort key had no date. Recreated with `ORDER BY (date, ...)` and reloaded from Parquet (derived tables, no data lost). |
+| 2026-11-19 03:05 | **The daily cron runs at 04:40 UTC, not 01:40.** Cron uses the distro's local time (UTC−3). A catch-up script that waited for "after 01:40" ran `tickdb dq daily` for 11-18 before that day was compacted and wrote rows marked `fail`. They were removed (Parquet and ClickHouse), and `tickdb dq daily` now refuses a day that isn't compacted. |
+
+## Data quality and monitoring (M5)
+
+- **Daily DQ:** the daily job's `dq` step writes `dq_daily`, `dq_outliers` and `dq_latency` for D-1 and loads them, with the day's gaps, into ClickHouse ([dq.md](dq.md)). To redo a day: `tickdb dq daily --date D`. It refuses a day that isn't compacted.
+- **Monitoring:** `make up` builds and starts the exporter next to ClickHouse, Prometheus and Grafana. `make check-monitoring` is the AC-W-09 check ([monitoring.md](monitoring.md)).
+- **Acceptance figures:** `tickdb dq acceptance --from D1 --to D2` gives AC-W-02 over a range and writes `results/dq_acceptance.json`. `pytest -m data tests/live/test_binance_vision.py` runs the id-set check against data.binance.vision.
+
+Days captured before M5 were brought up to date on 2026-11-18 and 11-19, all at `nice 10` with ionice idle:
+
+| Day | What ran | Result |
+|---|---|---|
+| 2026-11-07 to 11-11, 11-17 | `tickdb dq daily` on the existing archive | DQ rows for all 27 streams. 11-07 and 11-11 `fail` on coverage (the ISP outage and the host crash); the rest `pass` or `warn`. |
+| 2026-11-16 | full daily job (never run: the job was down 11-13 to 11-17) | every step ok, replay identical |
+| 2026-11-15 | full daily job (partial day: capture resumed at 17:43) | every step ok |
+| 2026-11-12 | full daily job (partial day: host down from 19:02) | every step ok. Binance REST refused the gaps as older than 2 days (code -4166), so data.binance.vision filled them. |
+
+**AC-W-02 on every compacted day, 2026-11-07 to 11-17** (11-13 and 11-14 had no capture):
+
+- 856 gaps, 100 % classified;
+- 99.985 % of covered trade-gap seconds recovered (Kraken 165,880.9 of 165,958.3 s; Binance and Coinbase 100 %);
+- 0 duplicate trade keys left in 27 venue-days;
+- the BTCUSDT trade-id set equals data.binance.vision on 2026-11-08, 11-09 and 11-10 (726,372, 1,551,055 and 1,521,662 ids).
 
 ## Query verification (M4, AC-W-04)
 
