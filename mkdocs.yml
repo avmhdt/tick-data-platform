@@ -14,5 +14,8 @@ nav:
   - Quickstart: quickstart.md
   - Schemas: schemas.md
   - Python client: client.md
+  - Data quality: dq.md
+  - Monitoring: monitoring.md
+  - Maintenance windows: maintenance.md
   - Operations: operations.md
   - Decisions: decisions.md

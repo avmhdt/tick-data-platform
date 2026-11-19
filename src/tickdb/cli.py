@@ -617,6 +617,139 @@ def dq_summary(
     typer.echo(str(path))
 
 
+@dq_app.command("acceptance")
+def dq_acceptance(
+    from_: FromOpt,
+    to: Annotated[str, typer.Option("--to", help="Last UTC date (inclusive).")],
+    out: Annotated[Path, typer.Option(help="JSON written here.")] = Path(
+        "results/dq_acceptance.json"
+    ),
+    dest: DestOpt = None,
+    config: ConfigOpt = None,
+) -> None:
+    """AC-W-02 evidence (gaps classified and recovered, no duplicates, binance.vision) and
+    whether every compacted day has DQ rows. Exit 1 if AC-W-02 does not pass.
+
+    Example: tickdb dq acceptance --from 2026-11-07 --to 2026-11-17
+    """
+    from datetime import date as _date
+
+    from tickdb.dq import acceptance
+
+    _, cfg = _load(config)
+    root = dest or Path(cfg.data_root).expanduser()
+    result = acceptance.evaluate(
+        root, _date.fromisoformat(from_), _date.fromisoformat(to),
+        vision=Path("results") / "binance_vision_check.json",
+    )  # fmt: skip
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    typer.echo(json.dumps(result, indent=2))
+    raise typer.Exit(EXIT_OK if result["ac_w02"]["pass"] else EXIT_FAIL)
+
+
+@dq_app.command("site")
+def dq_site(
+    out: Annotated[Path, typer.Option(help="Output folder.")] = Path("site-dq"),
+    from_: Annotated[str | None, typer.Option("--from", help="First UTC date.")] = None,
+    to: Annotated[str | None, typer.Option("--to", help="Last UTC date (inclusive).")] = None,
+    dest: DestOpt = None,
+    config: ConfigOpt = None,
+) -> None:
+    """Static public DQ site (aggregates only): coverage heatmap, status, latency, gaps.
+
+    Example: tickdb dq site --out site-dq --from 2026-11-18
+    """
+    from datetime import date as _date
+
+    from tickdb.dq import daily, site
+
+    _, cfg = _load(config)
+    root = dest or Path(cfg.data_root).expanduser()
+    summary = site.build(
+        root, out,
+        _date.fromisoformat(from_) if from_ else None,
+        _date.fromisoformat(to) if to else None,
+        limits=daily.Limits.from_config(cfg.dq),
+    )  # fmt: skip
+    typer.echo(json.dumps(summary))
+
+
+@dq_app.command("daily")
+def dq_daily(
+    date_: DateOpt,
+    venue: VenueOpt = None,
+    load: Annotated[
+        bool, typer.Option(help="Also load dq_daily/dq_outliers into ClickHouse.")
+    ] = True,
+    dest: DestOpt = None,
+    config: ConfigOpt = None,
+) -> None:
+    """DQ checks DQ-05 to DQ-10 for a compacted day: dq_daily, dq_outliers, hourly latency.
+
+    Exit 1 if any row's status is fail.
+
+    Example: tickdb dq daily --date 2026-11-17 --venue kraken
+    """
+    from datetime import date as _date
+
+    from tickdb.dq import daily
+
+    settings, cfg = _load(config)
+    root = dest or Path(cfg.data_root).expanduser()
+    day = _date.fromisoformat(date_)
+    lim = daily.Limits.from_config(cfg.dq)
+    shared = Path(cfg.capture.shared_root).expanduser()
+    writer = None
+    if load and settings.clickhouse_password is not None:
+        from tickdb.load import clickhouse as ch
+
+        writer = ch.connect_settings(settings)
+    failed = False
+    for name in _venue_list(cfg, venue):
+        symbols = tuple(cfg.venues[name].symbols)
+        try:
+            result = daily.check_day(root, name, day, symbols, shared_root=shared, limits=lim)
+        except FileNotFoundError as exc:
+            typer.echo(str(exc), err=True)
+            failed = True
+            continue
+        daily.write_day(root, result)
+        loaded = daily.load_day(writer, root, name, day) if writer is not None else None
+        statuses = result.statuses
+        failed |= "fail" in statuses.values()
+        line = {"venue": name, "date": date_, "status": statuses}
+        typer.echo(json.dumps(line | {"outliers": result.outliers.num_rows, "loaded": loaded}))
+    raise typer.Exit(EXIT_FAIL if failed else EXIT_OK)
+
+
+@app.command("exporter")
+def exporter_cmd(
+    port: Annotated[int, typer.Option(help="Port for /metrics.")] = 9108,
+    addr: Annotated[str, typer.Option(help="Listen address.")] = "0.0.0.0",
+    shared_root: Annotated[
+        Path | None, typer.Option(help="Shared capture root; default capture.shared_root.")
+    ] = None,
+    guard: Annotated[
+        Path | None, typer.Option(help="Host drive whose free space is guarded (/mnt/g).")
+    ] = None,
+    dest: DestOpt = None,
+    config: ConfigOpt = None,
+) -> None:
+    """Prometheus exporter for the shared capture, NTP probe, disk and job status (FR-18 to 21).
+
+    Runs in compose as the `exporter` service; Prometheus scrapes it every 15 s.
+
+    Example: tickdb exporter --port 9108
+    """
+    from tickdb.monitor import exporter
+
+    settings, cfg = _load(config)
+    root = dest or Path(cfg.data_root).expanduser()
+    shared = shared_root or Path(cfg.capture.shared_root).expanduser()
+    exporter.serve(shared, root, port, settings.ntp_server, addr=addr, guard=guard)
+
+
 @app.command("backfill")
 def backfill_cmd(
     date_: DateOpt,
@@ -795,12 +928,32 @@ def scheduler_run(
                     "replay", bool(rep["ok"]), f"partitions={len(rep['partitions'])}"
                 )
 
+            def dq(name: str = name, symbols: tuple[str, ...] = symbols) -> scheduler.StepResult:
+                from collections import Counter
+
+                from tickdb.dq import daily
+
+                result = daily.check_day(
+                    root, name, day, symbols,
+                    shared_root=Path(cfg.capture.shared_root).expanduser(),
+                    limits=daily.Limits.from_config(cfg.dq),
+                )  # fmt: skip
+                daily.write_day(root, result)
+                if settings.clickhouse_password is not None:
+                    from tickdb.load import clickhouse as ch
+
+                    daily.load_day(ch.connect_settings(settings), root, name, day)
+                counts = Counter(result.statuses.values())
+                # a fail is a verdict on the data, not a failed step: the day is still reported
+                return scheduler.StepResult("dq", True, json.dumps(dict(sorted(counts.items()))))
+
             actions: dict[str, Callable[..., scheduler.StepResult]] = {
                 "compact": compact,
                 "backfill": backfill,
                 "recompact": recompact,
                 "load": load,
                 "replay": replay,
+                "dq": dq,
             }
             results[name] = scheduler.daily_steps(name, day, actions, log)
         report.write_day(root, day, reports)

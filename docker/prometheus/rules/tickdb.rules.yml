@@ -1,2 +1,77 @@
-# Alert rules (FR-20) are filled in at M5, once the metrics they read exist.
-groups: []
+# Alert rules (FR-20). Firing state shows in Grafana's "Feed health" dashboard (alert list
+# panel); notification delivery is out of scope. In shared-capture mode the "ingestor" is the
+# shared recorder as seen through the tickdb exporter (docs/decisions.md, M5).
+groups:
+  - name: tickdb-feed
+    rules:
+      - alert: TickdbExporterDown
+        expr: up{job="tickdb-ingest"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "tickdb exporter not scraped for 2 min"
+      - alert: TickdbIngestorDown
+        expr: tickdb_capture_status_age_seconds > 120 or tickdb_capture_stopped == 1
+        labels: {severity: critical}
+        annotations:
+          summary: "Shared recorder status not updated for over 2 min (or recorder stopped)"
+      - alert: TickdbVenueDisconnected
+        expr: tickdb_ws_connected == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.venue }}: no open websocket connection for 2 min"
+      - alert: TickdbNoFrames
+        expr: max by (venue, symbol) (tickdb_last_frame_age_seconds{channel="book_l2"}) > 60
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.venue }} {{ $labels.symbol }}: no book frame for over 60 s"
+      - alert: TickdbFeedLatencyHigh
+        # The shared recorder publishes a running median only; the p99 per hour is in the
+        # daily DQ tables (docs/decisions.md, M5).
+        expr: tickdb_feed_latency_p50_seconds > 1
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.venue }}: feed latency median above 1 s for 10 min"
+      - alert: TickdbResyncsHigh
+        expr: sum by (venue) (increase(tickdb_resyncs_total[1h])) > 10
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.venue }}: more than 10 book resyncs in the last hour"
+      - alert: TickdbClockOffset
+        expr: abs(tickdb_clock_offset_seconds) > 0.05
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "Host clock offset against NTP above 50 ms"
+  - name: tickdb-host-and-jobs
+    rules:
+      - alert: TickdbDiskFreeLow
+        expr: tickdb_disk_free_ratio < 0.15
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.path }}: less than 15 % free"
+      - alert: TickdbGuardFloor
+        # The owner's free-space floor on the shared host drive (150 GB).
+        expr: tickdb_disk_free_bytes{path="guard"} < 150e9
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "Host drive below the 150 GB free-space floor"
+      - alert: TickdbDailyJobFailed
+        expr: tickdb_job_last_run_ok{job="daily"} == 0
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.venue }}: last daily job run failed"
+      - alert: TickdbDailyJobLate
+        expr: time() - tickdb_job_last_run_timestamp{job="daily"} > 26 * 3600
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.venue }}: no daily job run for 26 h"
+      - alert: TickdbMirrorFailed
+        expr: tickdb_job_last_run_ok{job="mirror"} == 0 or time() - tickdb_job_last_run_timestamp{job="mirror"} > 2 * 3600
+        labels: {severity: warning}
+        annotations:
+          summary: "Raw mirror: last run failed or no run for 2 h"

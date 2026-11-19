@@ -1,0 +1,42 @@
+# promtool test rules docker/prometheus/tests/rules_test.yml (run in CI)
+rule_files:
+  - ../rules/tickdb.rules.yml
+evaluation_interval: 30s
+tests:
+  - interval: 30s
+    input_series:
+      - series: 'up{job="tickdb-ingest", instance="shared-capture"}'
+        values: "1 1 0 0 0 0 0 0"
+      - series: 'tickdb_last_frame_age_seconds{venue="kraken", symbol="BTC/USD", channel="book_l2"}'
+        values: "1 2 70 80"
+      - series: 'tickdb_job_last_run_ok{job="daily", venue="coinbase"}'
+        values: "1 1 0"
+      - series: 'tickdb_disk_free_bytes{path="guard"}'
+        values: "200e9x10 100e9x12"
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: TickdbExporterDown
+        exp_alerts: []
+      - eval_time: 3m30s
+        alertname: TickdbExporterDown
+        exp_alerts:
+          - exp_labels: {severity: critical, job: tickdb-ingest, instance: shared-capture}
+            exp_annotations: {summary: "tickdb exporter not scraped for 2 min"}
+      - eval_time: 1m
+        alertname: TickdbNoFrames
+        exp_alerts:
+          - exp_labels: {severity: critical, venue: kraken, symbol: BTC/USD}
+            exp_annotations: {summary: "kraken BTC/USD: no book frame for over 60 s"}
+      - eval_time: 1m
+        alertname: TickdbDailyJobFailed
+        exp_alerts:
+          - exp_labels: {severity: warning, job: daily, venue: coinbase}
+            exp_annotations: {summary: "coinbase: last daily job run failed"}
+      - eval_time: 4m
+        alertname: TickdbGuardFloor
+        exp_alerts: []
+      - eval_time: 11m
+        alertname: TickdbGuardFloor
+        exp_alerts:
+          - exp_labels: {severity: critical, path: guard}
+            exp_annotations: {summary: "Host drive below the 150 GB free-space floor"}

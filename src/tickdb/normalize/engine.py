@@ -139,6 +139,7 @@ class Engine:
         seen = self._seen[symbol]
         if trade_id in seen:
             self.counters["dup_trades_removed"] += 1
+            self.counters[f"dup_trades_removed/{symbol}"] += 1
             return
         seen.add(trade_id)
         b = self._trades[symbol].cols

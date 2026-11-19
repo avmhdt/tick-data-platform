@@ -6,4 +6,16 @@ datasources:
     access: proxy
     url: http://prometheus:9090
     isDefault: true
-  # The ClickHouse datasource (read-only user tickdb_ro) is added at M4/M5.
+  # DQ tables through the read-only user (readonly=2, SELECT on tickdb.*).
+  - name: ClickHouse
+    uid: clickhouse
+    type: grafana-clickhouse-datasource
+    jsonData:
+      host: clickhouse
+      port: 8123
+      protocol: http
+      secure: false
+      username: tickdb_ro
+      defaultDatabase: tickdb
+    secureJsonData:
+      password: $__env{CLICKHOUSE_READONLY_PASSWORD}
