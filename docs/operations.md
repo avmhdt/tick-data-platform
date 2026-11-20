@@ -167,6 +167,32 @@ Days captured before M5 were brought up to date on 2026-11-18 and 11-19, all at 
 - 0 duplicate trade keys left in 27 venue-days;
 - the BTCUSDT trade-id set equals data.binance.vision on 2026-11-08, 11-09 and 11-10 (726,372, 1,551,055 and 1,521,662 ids).
 
+## ITCH bulk-load (M6, FR-25)
+
+`tickdb import itch --date D --source <itch-feed-handler data dir>` imports itch-feed-handler's
+canonical output for one day as venue `XNAS` and loads it into ClickHouse. It writes
+`meta/import/itch/date=D.json` with rows, rates, bytes and the cross-check, and exits 2 if the
+cross-check fails. The mapping is described in `src/tickdb/load/itch.py` and docs/decisions.md (M6).
+
+Run of 2019-01-30 (`01302019.NASDAQ_ITCH50`, 4.76 GB gzip, 368,366,634 messages parsed by
+itch-feed-handler for its 50-symbol universe), on 2026-11-20 at `nice 10`, ionice idle,
+8 Polars threads:
+
+| | trades | book_l3 |
+|---|---|---|
+| Rows imported | 1,329,771 (printable; 515 non-printable executions left out) | 34,504,280 |
+| UTC dates | 2019-01-30, 2019-01-31 (1,668 post-market rows) | 2019-01-30, 2019-01-31 (24,645) |
+| Producer Parquet in | 25.5 MB | 511.8 MB |
+| Archive Parquet out | 16.2 MB, 12.17 bytes/row | 444.3 MB, 12.88 bytes/row |
+| ClickHouse (compressed, before merges) | 17.6 MB, 13.26 bytes/row | 745.0 MB, 21.59 bytes/row |
+
+- **Cross-check against itch-feed-handler:** imported trades = the producer's 1,329,771 printable rows, and every symbol's imported quantity equals `trade_volume` in its build report (50 of 50). For example, AAPL has 101,440 trades and 14,515,529 shares in ClickHouse, the same as the report.
+- **ClickHouse load:** fingerprints (row count and time-column sum) match Parquet for both dates and both tables.
+- **Speed, not a benchmark:**
+  - The import took 3,080 s, 11,633 rows/s; the ClickHouse load took 314 s, 114,211 rows/s.
+  - The host had a load average of 30 to 39 from other projects, and this job ran at `nice 10`. A profile of two symbols shows every step CPU-starved: sorting 3.5 M rows took 8.8 s, and opening a Parquet writer took 1.6 s.
+  - AC-H-06's rows/s and query latency are published by the benchmark suite, which runs after the multi-week runs end (2026-12-18), on an idle host.
+
 ## Query verification (M4, AC-W-04)
 
 `tickdb verify --date D [--venue V]` recomputes the typical queries from the mirrored raw

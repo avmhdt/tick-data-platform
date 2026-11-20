@@ -314,3 +314,30 @@ the build. `DECISIONS.md` overrides the spec, and the spec overrides `README.md`
       and D+1, because trades late on D arrive after midnight.
     - Days whose gaps were filled from that same file are circular and don't count.
     - 2026-11-08, 11-09 and 11-10 are exactly equal: 726,372, 1,551,055 and 1,521,662 ids.
+
+### M6 (2026-11-20)
+
+1. **ITCH import before the benchmarks.** The ITCH import (FR-25) runs now. The benchmark
+   suite and its published numbers (AC-H-01, 02, 03 and 06) wait until the multi-week runs end
+   on 2026-12-18 (the 30-day window to 12-17, the shared recorder to 12-18 02:00 UTC), so they
+   are measured on an idle host. Ruling relayed by the coordinating session, 2026-11-20.
+2. **No second ITCH parser (D-09).** `tickdb import itch` maps itch-feed-handler's canonical
+   `book_l3` and `trades` to tickdb's schemas:
+    - `book_l3` keeps the canonical columns. `msg_type`, `tracking_number`, `mpid` and `printable` are left out.
+    - `trades` keeps printable trades only, `source = 'import'`. Non-printable executions aren't tape volume, and the schema has no flag for them. The ITCH message type, cross type and the producer's broken flag are left out (no trade was marked broken on 2019-01-30).
+3. **`ts_recv = ts_exchange` for ITCH.** A historical file has no receive time (DQ-07).
+   Partitions follow the UTC date of `ts_recv` (DQ-02). Nasdaq's post-market runs to
+   20:00 ET, so the last hours of an ITCH day are in the next UTC date's partition.
+4. **"Trade count matches itch-feed-handler"** is checked two ways:
+    - imported rows equal the producer's printable trade rows;
+    - per symbol, the imported quantity equals `trade_volume` in the producer's build report, an independent total from its parser.
+
+   The build report has volumes, not trade counts.
+5. **ClickHouse `book_l3` sorts by `(date, venue, symbol, ts_exchange, ifNull(seq, 0),
+   order_id, event)`.** On 2019-01-30, 61 keys of the old sort order covered 183 distinct
+   events: one order with several executions in the same nanosecond. A ReplacingMergeTree
+   would have merged them. The producer's `seq` is unique per symbol, and the date leads the
+   key as for the DQ tables.
+6. **The export covers itch-feed-handler's 50-symbol universe**, not every Nasdaq symbol.
+   "One full ITCH day" is that day's whole canonical output: 368 M messages parsed, 50 symbols
+   kept.
