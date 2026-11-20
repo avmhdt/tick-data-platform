@@ -21,6 +21,14 @@ which WSL's `df` overstates, and keep it above 150 GB:
 powershell.exe -c "(Get-PSDrive D).Free/1GB"
 ```
 
+**Thread budget.** The host's 32 logical CPUs are shared by every project, and each heavy job
+gets at most 8 threads. Importing `tickdb` caps every thread pool before it loads:
+`OMP_NUM_THREADS` (which Arrow follows), `OPENBLAS_NUM_THREADS`, `MKL_NUM_THREADS`,
+`NUMEXPR_NUM_THREADS`, `NUMBA_NUM_THREADS`, `POLARS_MAX_THREADS` and `RAYON_NUM_THREADS` are set
+to `TICKDB_MAX_THREADS` (default 8), unless the environment already has a lower value. DuckDB
+connections use the same limit, and both ClickHouse profiles set `max_threads` to 8. Heavy
+runs also go at `nice 10` with ionice idle.
+
 ## Running the stack
 
 From the WSL Ubuntu distro, in the repo root:
