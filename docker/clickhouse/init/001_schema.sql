@@ -99,7 +99,8 @@ CREATE TABLE IF NOT EXISTS tickdb.book_l3
 )
 ENGINE = ReplacingMergeTree
 PARTITION BY (date, venue)
-ORDER BY (venue, symbol, ts_exchange, order_id, event);
+-- seq in the key: one order can have several events of one kind in the same nanosecond
+ORDER BY (date, venue, symbol, ts_exchange, ifNull(seq, 0), order_id, event);
 
 CREATE TABLE IF NOT EXISTS tickdb.gaps
 (
