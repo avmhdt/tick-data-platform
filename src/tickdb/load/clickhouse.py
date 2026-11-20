@@ -36,7 +36,9 @@ TABLES: dict[str, tuple[str, str, str]] = {
     "bbo": ("bbo", "", "ts_recv"),
     "bars_1s": ("bars", "interval=1s", "ts"),
     "bars_1m": ("bars", "interval=1m", "ts"),
+    "book_l3": ("book_l3", "", "ts_recv"),
 }
+CRYPTO_TABLES = ("trades", "book_l2", "bbo", "bars_1s", "bars_1m")
 
 
 def schema_statements(sql: str | None = None) -> list[str]:
@@ -83,7 +85,7 @@ def load_venue_day(
     venue: str,
     day: date,
     symbols: tuple[str, ...],
-    tables: tuple[str, ...] = tuple(TABLES),
+    tables: tuple[str, ...] = CRYPTO_TABLES,
     database: str = "tickdb",
     batch_rows: int = 1_000_000,
 ) -> LoadReport:
