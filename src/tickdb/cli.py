@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,6 +30,8 @@ config_app = typer.Typer(help="Configuration checks.")
 app.add_typer(schema_app, name="schema")
 app.add_typer(clock_app, name="clock")
 app.add_typer(config_app, name="config")
+import_app = typer.Typer(help="Bulk imports from other producers.")
+app.add_typer(import_app, name="import")
 
 ConfigOpt = Annotated[
     Path | None, typer.Option("--config", help="YAML config; default TICKDB_CONFIG.")
@@ -453,6 +456,56 @@ def _venue_list(cfg: TickdbConfig, venue: str | None) -> list[str]:
 
 def _raw_root(data_root: Path, raw: Path | None) -> Path:
     return raw or data_root / "raw" / "external" / "lob-alpha"
+
+
+@import_app.command("itch")
+def import_itch(
+    date_: DateOpt,
+    source: Annotated[
+        Path | None,
+        typer.Option(help="itch-feed-handler output; default TICKDB_ITCH_CANONICAL_DIR."),
+    ] = None,
+    load: Annotated[bool, typer.Option(help="Also load into ClickHouse.")] = True,
+    dest: DestOpt = None,
+    config: ConfigOpt = None,
+) -> None:
+    """ITCH bulk-load (FR-25): itch-feed-handler's book_l3 and trades for one day into the
+    archive as venue XNAS, then ClickHouse. Exit 2 if the trade cross-check fails.
+
+    Example: tickdb import itch --date 2019-01-30
+    """
+    from datetime import date as _date
+
+    from tickdb.load import itch
+
+    settings, cfg = _load(config)
+    root = dest or Path(cfg.data_root).expanduser()
+    src = source or Path(settings.tickdb_itch_canonical_dir).expanduser()
+    if not str(src) or not (src / "trades").is_dir():
+        typer.echo(f"no itch-feed-handler output at {src!s}", err=True)
+        raise typer.Exit(EXIT_CONFIG)
+    rep = itch.import_day(src, root, _date.fromisoformat(date_))
+    out = rep.as_dict()
+    if load and settings.clickhouse_password is not None:
+        from tickdb.load import clickhouse as ch
+
+        client = ch.connect_settings(settings)
+        ch.apply_schema(client)
+        started = time.perf_counter()
+        loaded: dict[str, dict[str, Any]] = {}
+        for d in rep.dates:
+            r = ch.load_venue_day(
+                client, root, itch.VENUE, _date.fromisoformat(d), tuple(rep.symbols),
+                tables=("trades", "book_l3"),
+            )  # fmt: skip
+            loaded[d] = {"ok": r.ok, "rows": {t: v["rows"] for t, v in r.tables.items()}}
+        secs = time.perf_counter() - started
+        rows = sum(sum(v["rows"].values()) for v in loaded.values())
+        out["clickhouse"] = {"loaded": loaded, "seconds": round(secs, 1),
+                             "rows_per_s": round(rows / secs) if secs else None}  # fmt: skip
+        out["ok"] = out["ok"] and all(v["ok"] for v in loaded.values())
+    typer.echo(json.dumps(out, indent=2))
+    raise typer.Exit(EXIT_OK if out["ok"] else EXIT_MISMATCH)
 
 
 @app.command("compact")
