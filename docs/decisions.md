@@ -317,6 +317,9 @@ the build. `DECISIONS.md` overrides the spec, and the spec overrides `README.md`
 
 ### M6 (2026-11-20)
 
+0. **M6 is split into two PRs.** Part 1, the ITCH import, merges now (PR #6). Part 2, the
+   benchmark suite and `docs/benchmarks.md` with AC-H-01, 02, 03 and 06, follows after 2026-12-18.
+   M6's exit is judged after part 2. Ruling relayed by the coordinating session, 2026-11-20.
 1. **ITCH import before the benchmarks.** The ITCH import (FR-25) runs now. The benchmark
    suite and its published numbers (AC-H-01, 02, 03 and 06) wait until the multi-week runs end
    on 2026-12-18 (the 30-day window to 12-17, the shared recorder to 12-18 02:00 UTC), so they
