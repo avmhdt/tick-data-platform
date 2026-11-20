@@ -44,7 +44,7 @@ import polars as pl
 import pyarrow as pa
 import pyarrow.parquet as pq
 
-from tickdb import schemas
+from tickdb import MAX_THREADS, schemas
 from tickdb.compact.compactor import partition_dir
 from tickdb.dq.report import load_gaps
 from tickdb.timeutil import day_bounds
@@ -332,7 +332,7 @@ def _book_scan(files: list[str], start: int, s: _Stream) -> tuple[int, bool]:
 
 
 def _book_dups_exact(files: list[str]) -> int:
-    con = duckdb.connect()
+    con = duckdb.connect(config={"threads": int(MAX_THREADS)})
     listing = ", ".join(f"'{f}'" for f in files)
     row = con.execute(
         f"SELECT count(*) - count(DISTINCT (batch_id, level_idx)) FROM read_parquet([{listing}])"

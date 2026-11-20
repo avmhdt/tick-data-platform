@@ -26,7 +26,7 @@ from urllib.parse import quote
 import polars as pl
 import pyarrow as pa
 
-from tickdb import schemas
+from tickdb import MAX_THREADS, schemas
 from tickdb.compact.bars import INTERVALS, compute_bars, resample_bars
 from tickdb.config import Settings
 from tickdb.query import asof as asof_q
@@ -291,7 +291,7 @@ class Client:
             return _out(pl.from_arrow(table), as_)  # type: ignore[arg-type]
         import duckdb
 
-        con = duckdb.connect()
+        con = duckdb.connect(config={"threads": int(MAX_THREADS)})
         for dataset in ("trades", "book_l2", "bbo", "bars"):
             pattern = self.root / dataset / "**" / "*.parquet"
             if any((self.root / dataset).glob("**/*.parquet")):

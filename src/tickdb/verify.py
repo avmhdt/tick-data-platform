@@ -31,6 +31,7 @@ from typing import Any
 import duckdb
 import orjson
 
+from tickdb import MAX_THREADS
 from tickdb.compact.compactor import partition_dir
 from tickdb.normalize.rawlog import day_records
 from tickdb.timeutil import day_bounds
@@ -135,7 +136,7 @@ def verify_day(
 ) -> list[Check]:
     checks: list[Check] = []
     start, end = day_bounds(day)
-    con = duckdb.connect()
+    con = duckdb.connect(config={"threads": int(MAX_THREADS)})
     with tempfile.TemporaryDirectory() as tmp:
         frames = Path(tmp) / "frames.jsonl"
         raw_trades(raw_roots, venue, day, frames)
