@@ -67,21 +67,22 @@ job copies each closed hour into `$DATA_ROOT/raw/external/lob-alpha/`.
 ```bash
 cd ~/tick-data-platform-deploy && ~/.local/bin/uv run --no-sync tickdb mirror status \
   --source ~/data/crypto-lob-alpha --dest ~/data/tick-data-platform \
-  --from 2026-11-08 --to 2026-12-17 --exclude binance-usdm:ticker
+  --from 2026-11-08 --to 2026-12-22 --exclude binance-usdm:ticker
 ```
 
-The cron entry (WSL crontab of user `ze`; remove it after 2026-12-19):
+The cron entry (WSL crontab of user `ze`; remove it after 2026-12-24):
 
 ```cron
-# tdp-mirror: tick-data-platform read-only copy of the shared raw archive from 2026-11-08 (window 2026-11-18..12-17). Remove after 2026-12-19.
-25 * * * * cd /home/ze/tick-data-platform-deploy && nice -n 10 ionice -c3 /home/ze/.local/bin/uv run --no-sync tickdb mirror run --source /home/ze/data/crypto-lob-alpha --dest /home/ze/data/tick-data-platform --from 2026-11-08 --to 2026-12-17 --exclude binance-usdm:ticker --guard-path /mnt/g --floor-gb 150 --rate-mb 8 >> /home/ze/data/tick-data-platform/meta/mirror/run.log 2>&1 # tdp-mirror
+# tdp-mirror: tick-data-platform read-only copy of the shared raw archive from 2026-11-08 (window 2026-11-23..12-22). Remove after 2026-12-24.
+25 * * * * cd /home/ze/tick-data-platform-deploy && nice -n 10 ionice -c3 /home/ze/.local/bin/uv run --no-sync tickdb mirror run --source /home/ze/data/crypto-lob-alpha --dest /home/ze/data/tick-data-platform --from 2026-11-08 --to 2026-12-22 --exclude binance-usdm:ticker --guard-path /mnt/g --floor-gb 150 --rate-mb 8 >> /home/ze/data/tick-data-platform/meta/mirror/run.log 2>&1 # tdp-mirror
 ```
 
 ## Capture window
 
-**Day 1 is 2026-11-18** (owner ruling, 2026-11-17). The 30-day AC-W-01 window runs from
-2026-11-18 00:00 to 2026-12-17 24:00 UTC. The shared recorder keeps running to at least
-2026-12-18 02:00 UTC; the Windows Update hold is extended to about 2026-12-22.
+**Day 1 is 2026-11-23** (owner ruling, 2026-11-24). The 30-day AC-W-01 window runs from
+2026-11-23 00:00 to 2026-12-22 24:00 UTC. The shared recorder keeps running to at least
+2026-12-23 02:00 UTC; the Windows Update pause is extended to about 2026-12-29. The last daily
+job (for 12-22) runs at 04:40 UTC on 12-23.
 
 Failed windows, published as findings:
 
@@ -89,6 +90,7 @@ Failed windows, published as findings:
 |---|---|---|---|
 | 2026-11-08 to 12-07 | 2026-11-10 | 2026-11-11 | Whole PC crashed; WSL down about 07:00 to 19:37:54 UTC (about 12.6 h) |
 | 2026-11-12 to 12-11 | 2026-11-11 | 2026-11-12 | WSL down 2026-11-12 19:02:42 to 11-15 17:43:45 UTC (about 70.7 h) |
+| 2026-11-18 to 12-17 | 2026-11-17 | 2026-11-21 | Drive G: dropout: capture stopped 2026-11-20 23:24:50 UTC, ran only briefly on 11-21, resumed 2026-11-22 19:05:01 UTC (11-21 and 11-22 far below 95 %) |
 
 ## Ingestor tests (M2)
 
@@ -199,7 +201,7 @@ itch-feed-handler for its 50-symbol universe), on 2026-11-20 at `nice 10`, ionic
 - **Speed, not a benchmark:**
   - The import took 3,080 s, 11,633 rows/s; the ClickHouse load took 314 s, 114,211 rows/s.
   - The host had a load average of 30 to 39 from other projects, and this job ran at `nice 10`. A profile of two symbols shows every step CPU-starved: sorting 3.5 M rows took 8.8 s, and opening a Parquet writer took 1.6 s.
-  - AC-H-06's rows/s and query latency are published by the benchmark suite, which runs after the multi-week runs end (2026-12-18), on an idle host.
+  - AC-H-06's rows/s and query latency are published by the benchmark suite, which runs after the multi-week runs end (2026-12-23), on an idle host.
 
 ## Query verification (M4, AC-W-04)
 
