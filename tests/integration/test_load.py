@@ -31,6 +31,7 @@ def client() -> object:
         password=os.environ["CLICKHOUSE_PASSWORD"],
     )
     ch.apply_schema(c)
+    c.command("ALTER TABLE tickdb.book_l2 REMOVE TTL")  # fixed fixture day, throwaway server
     return c
 
 
@@ -66,3 +67,13 @@ def test_schema_statements_are_idempotent(client: object) -> None:
         "SELECT engine_full FROM system.tables WHERE database='tickdb' AND name='book_l2'"
     )
     assert "toIntervalDay(14)" in str(ttl)
+
+
+def test_book_l2_past_ttl_is_skipped(client: object, tmp_path: Path) -> None:
+    raw = kraken_day(tmp_path / "raw")
+    data = tmp_path / "data"
+    compact_day(raw, data, "kraken", DAY, ("BTC/USD",))
+    rep = ch.load_venue_day(client, data, "kraken", DAY, ("BTC/USD",), book_l2_ttl_days=1)
+    assert rep.ok, rep.tables
+    assert rep.tables["book_l2"]["skipped"] == "past the ClickHouse TTL"
+    assert rep.tables["trades"]["rows"] > 0

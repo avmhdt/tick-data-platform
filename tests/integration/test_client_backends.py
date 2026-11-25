@@ -36,6 +36,9 @@ def backends(tmp_path_factory: pytest.TempPathFactory) -> tuple[object, object]:
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
     writer = ch.connect_settings(settings)
     ch.apply_schema(writer)
+    # The fixture day is fixed (2026-11-09); on a throwaway server the 14-day TTL would drop
+    # its book rows on insert once the day is old enough.
+    writer.command("ALTER TABLE tickdb.book_l2 REMOVE TTL")
     for venue, symbol in VENUES.items():
         compact_day(raw, data, venue, DAY, (symbol,))
         assert ch.load_venue_day(writer, data, venue, DAY, (symbol,)).ok
