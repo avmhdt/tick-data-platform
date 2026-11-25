@@ -48,7 +48,17 @@ class PushBookNormalizer(VenueNormalizer):
             origin = "state"
             if not bids and not asks:
                 carry = self.engine.carry.get(symbol, {})
-                if not carry.get("known") or carry.get("conn") != active:
+                # The previous day's book holds only if the connection stayed active across
+                # midnight: the day's first state record is at 00:00. A recorder restarted
+                # mid-day reuses connection names (ws.g0 again), so a later state record proves
+                # nothing, and a book already known from today's snapshot is never replaced.
+                across_midnight = ts == self.engine.start_ns
+                if (
+                    symbol in self.known
+                    or not across_midnight
+                    or not carry.get("known")
+                    or carry.get("conn") != active
+                ):
                     continue  # levels unknown until the next snapshot
                 bids = [(p, q) for p, q in carry.get("bids", [])]
                 asks = [(p, q) for p, q in carry.get("asks", [])]
