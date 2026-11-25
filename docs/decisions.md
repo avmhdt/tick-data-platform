@@ -63,6 +63,7 @@ the build. `DECISIONS.md` overrides the spec, and the spec overrides `README.md`
 | 2026-11-12 | AC-W-05 median resync, Binance | Owner, quoted: "Documented exception (Recommended)". The miss follows from the one-shared-capture decision: the measured time (median 27.6 s on 2026-11-07 to 11-11) is the shared recorder's, from its last good message to the validating snapshot after its reconnects. It is published next to this project's ingestor's tested figure (mock venues), each labelled. Threshold (≤ 10 s) unchanged. |
 | 2026-11-12 | **Correction to the Kraken crossed-BBO finding** | The 2,117 crossed rows on Kraken BTC/USD, 2026-11-08, were **this project's processing, not the venue's**. Kraken sends no delete for a level that leaves the subscribed 1,000-level scope; the normalizer truncated its book like Kraken, but the BBO replay did not, so a 74,062.4 bid that was cancelled while out of scope stayed in the BBO book and crossed it later. The venue-confirmed check added for the ruling found 0 crossed books behind a matching checksum, which exposed it. Fixed: the BBO replay truncates to the subscribed depth after every batch, as the venue does (D-06), and Kraken is re-derived. The owner's ruling stays as the rule for any future venue-confirmed cross; there is no such cross to publish for 11-08. |
 | 2026-11-17 | AC-W-01 window after the second host outage | WSL was down from 2026-11-12 19:02:42 to 11-15 17:43:45 UTC (about 70.7 h; boot history, shared raw archive and the mirror's run log agree), so the window 2026-11-12 to 12-11 failed on its first day; it is published as a failed window. A further 40 min outage on 11-17 (18:17:46 to 18:58:01 UTC) came with the move off the failing D: drive. Owner, quoted: "11-18 to 12-17 (Recommended)". **The 30-day window is 2026-11-18 to 2026-12-17**, in line with crypto-lob-alpha's window and leaving both allowed days below 99 % unused. The shared recorder runs to at least 2026-12-18 02:00 UTC (crypto-lob-alpha's session records that); the Windows Update hold is being extended to about 2026-12-22. Thresholds unchanged. The mirror's cron line becomes `--to 2026-12-17`, removed after 2026-12-19. |
+| 2026-11-24 | AC-W-01 window after the G: drive dropout | Drive G: failed writes from 2026-11-20 23:26 UTC and WSL went down. From the raw capture: the shared recorder stopped at 2026-11-20 23:24:50 UTC, ran only 11-21 16:58 to 17:10 and 18:53 to about 20:21, and resumed for good at 2026-11-22 19:05:01. A second stop on 11-24 lasted 14 min (20:24:31 to 20:38:20). 11-21 and 11-22 are far below 95 % coverage, so the window 2026-11-18 to 12-17 failed and is published as failed. Owner, quoted: "11-23 to 12-22 (Recommended)". **The 30-day window is 2026-11-23 to 2026-12-22.** The Windows Update pause is extended to about 2026-12-29; the shared recorder runs to at least 2026-12-23 02:00 UTC (crypto-lob-alpha's session records that). The last daily job runs at 04:40 UTC on 12-23. Thresholds unchanged. The mirror's cron line becomes `--to 2026-12-22`, and both tdp cron lines are removed after 2026-12-24. |
 
 ## Spec decisions (section 3)
 
@@ -181,9 +182,10 @@ the build. `DECISIONS.md` overrides the spec, and the spec overrides `README.md`
     zstd frame decoding (`tickdb mirror verify`; a frame the recorder itself cut in a crash is
     reported, not counted as a failure), and the recorder's per-minute ingest p99 during
     mirror runs no worse than otherwise (`scripts/recorder_impact.py`).
-14. **Capture Day 1 is 2026-11-18** (owner ruling of 2026-11-17). Earlier windows failed:
-    2026-11-08 to 12-07 (host crash, 11-11) and 2026-11-12 to 12-11 (70.7 h outage, 11-12 to
-    11-15). The 30-day window is 2026-11-18 to 2026-12-17.
+14. **Capture Day 1 is 2026-11-23** (owner ruling of 2026-11-24). Earlier windows failed:
+    2026-11-08 to 12-07 (host crash, 11-11), 2026-11-12 to 12-11 (70.7 h outage, 11-12 to
+    11-15) and 2026-11-18 to 12-17 (G: drive dropout, 11-20 to 11-22). The 30-day window is
+    2026-11-23 to 2026-12-22.
 
 ### M3 (2026-11-11)
 
@@ -318,12 +320,13 @@ the build. `DECISIONS.md` overrides the spec, and the spec overrides `README.md`
 ### M6 (2026-11-20)
 
 0. **M6 is split into two PRs.** Part 1, the ITCH import, merges now (PR #6). Part 2, the
-   benchmark suite and `docs/benchmarks.md` with AC-H-01, 02, 03 and 06, follows after 2026-12-18.
-   M6's exit is judged after part 2. Ruling relayed by the coordinating session, 2026-11-20.
+   benchmark suite and `docs/benchmarks.md` with AC-H-01, 02, 03 and 06, follows after the
+   multi-week runs end (2026-12-23 since the window moved; it was 2026-12-18). M6's exit is
+   judged after part 2. Ruling relayed by the coordinating session, 2026-11-20.
 1. **ITCH import before the benchmarks.** The ITCH import (FR-25) runs now. The benchmark
    suite and its published numbers (AC-H-01, 02, 03 and 06) wait until the multi-week runs end
-   on 2026-12-18 (the 30-day window to 12-17, the shared recorder to 12-18 02:00 UTC), so they
-   are measured on an idle host. Ruling relayed by the coordinating session, 2026-11-20.
+   (now 2026-12-23: the 30-day window to 12-22, the shared recorder to 12-23 02:00 UTC), so
+   they are measured on an idle host. Ruling relayed by the coordinating session, 2026-11-20.
 2. **No second ITCH parser (D-09).** `tickdb import itch` maps itch-feed-handler's canonical
    `book_l3` and `trades` to tickdb's schemas:
     - `book_l3` keeps the canonical columns. `msg_type`, `tracking_number`, `mpid` and `printable` are left out.
