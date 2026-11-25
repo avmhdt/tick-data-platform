@@ -31,7 +31,8 @@ def client() -> object:
         password=os.environ["CLICKHOUSE_PASSWORD"],
     )
     ch.apply_schema(c)
-    c.command("ALTER TABLE tickdb.book_l2 REMOVE TTL")  # fixed fixture day, throwaway server
+    if "TTL" in str(c.command("SHOW CREATE TABLE tickdb.book_l2")):
+        c.command("ALTER TABLE tickdb.book_l2 REMOVE TTL")  # fixed fixture day, throwaway server
     return c
 
 
