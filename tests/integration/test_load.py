@@ -64,10 +64,9 @@ def test_load_is_idempotent_and_matches_parquet(client: object, tmp_path: Path) 
 
 def test_schema_statements_are_idempotent(client: object) -> None:
     assert ch.apply_schema(client) == ch.apply_schema(client) >= 10
-    ttl = client.command(  # type: ignore[attr-defined]
-        "SELECT engine_full FROM system.tables WHERE database='tickdb' AND name='book_l2'"
-    )
-    assert "toIntervalDay(14)" in str(ttl)
+    # the live table's TTL is removed for the fixed fixture day; the schema itself keeps it
+    book = next(st for st in ch.schema_statements() if "TABLE IF NOT EXISTS tickdb.book_l2" in st)
+    assert "TTL date + INTERVAL 14 DAY" in book
 
 
 def test_book_l2_past_ttl_is_skipped(client: object, tmp_path: Path) -> None:
