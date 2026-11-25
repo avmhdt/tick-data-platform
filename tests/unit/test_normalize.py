@@ -204,6 +204,32 @@ def test_coinbase_carry_needs_the_same_connection(tmp_path: Path) -> None:
         assert (rows[0]["conn_id"] if rows else None) == origin
 
 
+def test_coinbase_carry_only_across_midnight(tmp_path: Path) -> None:
+    """2026-11-22: the recorder restarted mid-day and reused the connection name ws.g2; the
+    day's first state record came an hour later. The previous day's book must not replace the
+    book this day's snapshot gave (it left stale levels and crossed the book)."""
+    raw = coinbase_day(tmp_path / "raw")
+    nxt = RawDay(raw, "coinbase", NEXT)
+    nxt.control(3600.0, {"k": "conn_open", "conn": "ws.g2", "logical": "ws"})
+    nxt.frame(3601.0, "ws.g2", {"type": "snapshot", "product_id": "BTC-USD",
+                                "bids": [["150.00", "1.0"]], "asks": [["151.00", "1.0"]]})  # fmt: skip
+    state = {"books": {"BTC-USD": {"state": "LIVE"}}, "active": {"ws": "ws.g2"}}
+    nxt.control(7200.0, {"k": "state", "state": state})
+    nxt.write()
+    data = tmp_path / "data"
+    compact_day(raw, data, "coinbase", DAY, ("BTC-USD",))
+    result = compact_day(raw, data, "coinbase", NEXT, ("BTC-USD",))
+    rows = pq.read_table(partition_dir(data, "book_l2", "coinbase", "BTC-USD", NEXT)).to_pylist()
+    assert {r["conn_id"] for r in rows} == {"ws.g2"}  # no "carry" batch
+    assert result.counters.get("day_start_carry", 0) == 0
+    end = load_book_end(data, "coinbase", NEXT)["BTC-USD"]
+    assert end["bids"] == [["150.00", "1.0"]]
+    assert end["asks"] == [["151.00", "1.0"]]
+    bbo = pq.read_table(partition_dir(data, "bbo", "coinbase", "BTC-USD", NEXT)).to_pylist()
+    assert not [r for r in bbo if r["bid_px"] is not None and r["ask_px"] is not None
+                and r["bid_px"] >= r["ask_px"]]  # fmt: skip
+
+
 # ------------------------------------------------------------------ kraken
 
 
