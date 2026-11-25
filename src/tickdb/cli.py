@@ -619,8 +619,9 @@ def load_cmd(
     ok = True
     for name in _venue_list(cfg, venue):
         report = ch.load_venue_day(
-            client, root, name, _date.fromisoformat(date_), tuple(cfg.venues[name].symbols)
-        )
+            client, root, name, _date.fromisoformat(date_), tuple(cfg.venues[name].symbols),
+            book_l2_ttl_days=cfg.clickhouse.book_l2_ttl_days,
+        )  # fmt: skip
         rows = {t: v["rows"] for t, v in report.tables.items()}
         typer.echo(json.dumps({"venue": name, "date": date_, "ok": report.ok, "rows": rows}))
         ok &= report.ok
@@ -967,7 +968,10 @@ def scheduler_run(
 
                 client = ch.connect_settings(settings)
                 ch.apply_schema(client)
-                rep = ch.load_venue_day(client, root, name, day, symbols)
+                rep = ch.load_venue_day(
+                    client, root, name, day, symbols,
+                    book_l2_ttl_days=cfg.clickhouse.book_l2_ttl_days,
+                )  # fmt: skip
                 return scheduler.StepResult(
                     "load", rep.ok, json.dumps({t: v["rows"] for t, v in rep.tables.items()})
                 )

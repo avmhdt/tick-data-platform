@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -88,10 +88,23 @@ def load_venue_day(
     tables: tuple[str, ...] = CRYPTO_TABLES,
     database: str = "tickdb",
     batch_rows: int = 1_000_000,
+    book_l2_ttl_days: int | None = None,
 ) -> LoadReport:
+    """Load one venue-day. With ``book_l2_ttl_days``, ``book_l2`` is skipped for a day the
+    table's TTL has already expired (ClickHouse would drop the rows on insert, and the
+    fingerprint check could never pass); the archive keeps it, so it stays reloadable."""
     report = LoadReport(venue, day)
     part = f"('{day.isoformat()}', '{venue}')"
+    today = datetime.now(UTC).date()
     for table in tables:
+        if (
+            table == "book_l2"
+            and book_l2_ttl_days
+            and day + timedelta(days=book_l2_ttl_days) <= today
+        ):
+            report.tables[table] = {"rows": 0, "ok": True, "skipped": "past the ClickHouse TTL",
+                                    "symbols": {}}  # fmt: skip
+            continue
         dataset, sub, fp_col = TABLES[table]
         schema = schemas.SCHEMAS[dataset]
         staging = f"{database}._stage_{table}_{uuid.uuid4().hex[:12]}"
